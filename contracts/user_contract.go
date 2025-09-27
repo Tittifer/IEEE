@@ -26,7 +26,13 @@ func (c *UserContract) RegisterUser(ctx contractapi.TransactionContextInterface,
 	}
 
 	// 创建新用户
-	now := time.Now()
+	// 使用交易时间戳而不是当前时间，确保确定性
+	timestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return fmt.Errorf("获取交易时间戳失败: %v", err)
+	}
+	txTime := time.Unix(timestamp.Seconds, int64(timestamp.Nanos))
+	
 	userInfo := models.UserInfo{
 		DID:           did,
 		Name:          name,
@@ -36,8 +42,8 @@ func (c *UserContract) RegisterUser(ctx contractapi.TransactionContextInterface,
 		AccessLevel:   models.AccessLevelHighest, // 初始访问级别为1（最高权限）
 		Status:        models.StatusActive,       // 初始状态为活跃
 		AttackHistory: []models.Attack{},         // 初始攻击历史为空
-		CreatedAt:     now,
-		LastUpdatedAt: now,
+		CreatedAt:     txTime,
+		LastUpdatedAt: txTime,
 	}
 
 	// 将用户信息转换为JSON并存储
@@ -112,7 +118,13 @@ func (c *UserContract) ChangeUserStatus(ctx contractapi.TransactionContextInterf
 
 	// 更新状态
 	userInfo.Status = newStatus
-	userInfo.LastUpdatedAt = time.Now()
+	
+	// 使用交易时间戳而不是当前时间，确保确定性
+	timestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return fmt.Errorf("获取交易时间戳失败: %v", err)
+	}
+	userInfo.LastUpdatedAt = time.Unix(timestamp.Seconds, int64(timestamp.Nanos))
 
 	// 将更新后的用户信息转换为JSON并存储
 	userInfoJSON, err := json.Marshal(userInfo)

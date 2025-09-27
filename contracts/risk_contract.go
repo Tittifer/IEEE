@@ -24,9 +24,15 @@ func (c *RiskContract) RecordAttack(ctx contractapi.TransactionContextInterface,
 	}
 
 	// 创建新的攻击记录
-	now := time.Now()
+	// 使用交易时间戳而不是当前时间，确保确定性
+	timestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return fmt.Errorf("获取交易时间戳失败: %v", err)
+	}
+	txTime := time.Unix(timestamp.Seconds, int64(timestamp.Nanos))
+	
 	attack := models.Attack{
-		Timestamp:   now,
+		Timestamp:   txTime,
 		HoneypotID:  honeypotID,
 		AttackType:  attackType,
 		Description: description,
@@ -48,7 +54,7 @@ func (c *RiskContract) RecordAttack(ctx contractapi.TransactionContextInterface,
 	userInfo.AccessLevel = models.GetAccessLevelByRiskScore(newRiskScore)
 	userInfo.Status = models.GetStatusByRiskScore(newRiskScore)
 	
-	userInfo.LastUpdatedAt = now
+	userInfo.LastUpdatedAt = txTime
 
 	// 将更新后的用户信息转换为JSON并存储
 	userInfoJSON, err := json.Marshal(userInfo)
@@ -86,7 +92,12 @@ func (c *RiskContract) UpdateRiskScore(ctx contractapi.TransactionContextInterfa
 	userInfo.AccessLevel = models.GetAccessLevelByRiskScore(newRiskScore)
 	userInfo.Status = models.GetStatusByRiskScore(newRiskScore)
 	
-	userInfo.LastUpdatedAt = time.Now()
+	// 使用交易时间戳而不是当前时间，确保确定性
+	timestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return fmt.Errorf("获取交易时间戳失败: %v", err)
+	}
+	userInfo.LastUpdatedAt = time.Unix(timestamp.Seconds, int64(timestamp.Nanos))
 
 	// 将更新后的用户信息转换为JSON并存储
 	userInfoJSON, err := json.Marshal(userInfo)

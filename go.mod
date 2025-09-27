@@ -4,12 +4,10 @@ go 1.18
 
 // 添加替换指令，解决本地导入问题
 replace github.com/Tittifer/IEEE/contracts => ./contracts
+
 replace github.com/Tittifer/IEEE/models => ./models
 
-require (
-	github.com/hyperledger/fabric-chaincode-go v0.0.0-20230228194215-b84622ba6a7a
-	github.com/hyperledger/fabric-contract-api-go v1.2.1
-)
+require github.com/hyperledger/fabric-contract-api-go v1.2.1
 
 require (
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
@@ -20,6 +18,7 @@ require (
 	github.com/gobuffalo/packd v1.0.2 // indirect
 	github.com/gobuffalo/packr v1.30.1 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
+	github.com/hyperledger/fabric-chaincode-go v0.0.0-20230228194215-b84622ba6a7a // indirect
 	github.com/hyperledger/fabric-protos-go v0.3.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
