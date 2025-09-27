@@ -1,10 +1,10 @@
-module github.com/hyperledger-fabric/chaincode/IEEE
+module github.com/Tittifer/IEEE
 
 go 1.18
 
 // 添加替换指令，解决本地导入问题
-replace github.com/hyperledger-fabric/chaincode/IEEE/contracts => ./contracts
-replace github.com/hyperledger-fabric/chaincode/IEEE/models => ./models
+replace github.com/Tittifer/IEEE/contracts => ./contracts
+replace github.com/Tittifer/IEEE/models => ./models
 
 require (
 	github.com/hyperledger/fabric-chaincode-go v0.0.0-20230228194215-b84622ba6a7a

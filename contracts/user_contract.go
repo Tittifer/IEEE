@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
-	"github.com/hyperledger-fabric/chaincode/IEEE/models"
+	"github.com/Tittifer/IEEE/models"
 )
 
 // UserContract 用户管理合约

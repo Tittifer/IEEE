@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
-	"github.com/hyperledger-fabric/chaincode/IEEE/contracts"
+	"github.com/Tittifer/IEEE/contracts"
 )
 
 func main() {
