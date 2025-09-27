@@ -1,4 +1,13 @@
 #!/bin/bash
+# 设置默认环境变量，避免GVM_DEBUG未绑定错误
+GVM_DEBUG=0
+GVM_ROOT=$HOME/.gvm
+PATH=$PATH:$HOME/.gvm/bin
+export GVM_DEBUG GVM_ROOT PATH
+
+# 忽略未定义变量的错误
+set +u
+
 # 部署脚本 - 一键启动Fabric网络并部署链码
 # 作者: IEEE链码团队
 # 版本: 1.1

@@ -7,6 +7,7 @@ import (
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 	"github.com/Tittifer/IEEE/models"
+	"github.com/Tittifer/IEEE/utils"
 )
 
 // UserContract 用户管理合约
@@ -25,7 +26,6 @@ func (c *UserContract) RegisterUser(ctx contractapi.TransactionContextInterface,
 		return fmt.Errorf("用户DID %s 已存在", did)
 	}
 
-	// 创建新用户
 	// 使用交易时间戳而不是当前时间，确保确定性
 	timestamp, err := ctx.GetStub().GetTxTimestamp()
 	if err != nil {
@@ -33,6 +33,7 @@ func (c *UserContract) RegisterUser(ctx contractapi.TransactionContextInterface,
 	}
 	txTime := time.Unix(timestamp.Seconds, int64(timestamp.Nanos))
 	
+	// 创建新用户
 	userInfo := models.UserInfo{
 		DID:           did,
 		Name:          name,
@@ -45,6 +46,91 @@ func (c *UserContract) RegisterUser(ctx contractapi.TransactionContextInterface,
 		CreatedAt:     txTime,
 		LastUpdatedAt: txTime,
 	}
+
+	// 创建可验证凭证
+	credential, err := utils.CreateVerifiableCredential(userInfo)
+	if err != nil {
+		return fmt.Errorf("创建可验证凭证失败: %v", err)
+	}
+	
+	// 将凭证序列化为JSON
+	credentialJSON, err := json.Marshal(credential)
+	if err != nil {
+		return fmt.Errorf("凭证序列化失败: %v", err)
+	}
+	
+	// 将凭证存储到用户信息中
+	userInfo.Credential = string(credentialJSON)
+
+	// 将用户信息转换为JSON并存储
+	userInfoJSON, err := json.Marshal(userInfo)
+	if err != nil {
+		return fmt.Errorf("用户信息序列化失败: %v", err)
+	}
+
+	// 将用户信息写入账本
+	err = ctx.GetStub().PutState(did, userInfoJSON)
+	if err != nil {
+		return fmt.Errorf("存储用户信息时出错: %v", err)
+	}
+
+	return nil
+}
+
+// RegisterUserWithVehicle 注册新用户并生成可验证凭证
+func (c *UserContract) RegisterUserWithVehicle(ctx contractapi.TransactionContextInterface, name, idNumber, phoneNumber, vehiclePlate, vehicleModel, vehicleColor, vehicleVIN, publicKey string) error {
+	// 根据用户信息生成DID
+	did := utils.GenerateDID(name, idNumber)
+	
+	// 检查用户是否已存在
+	exists, err := c.UserExists(ctx, did)
+	if err != nil {
+		return fmt.Errorf("检查用户是否存在时出错: %v", err)
+	}
+	if exists {
+		return fmt.Errorf("用户DID %s 已存在", did)
+	}
+
+	// 使用交易时间戳而不是当前时间，确保确定性
+	timestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return fmt.Errorf("获取交易时间戳失败: %v", err)
+	}
+	txTime := time.Unix(timestamp.Seconds, int64(timestamp.Nanos))
+	
+	// 创建新用户
+	userInfo := models.UserInfo{
+		DID:           did,
+		Name:          name,
+		IDNumber:      idNumber,
+		PhoneNumber:   phoneNumber,
+		VehiclePlate:  vehiclePlate,
+		VehicleModel:  vehicleModel,
+		VehicleColor:  vehicleColor,
+		VehicleVIN:    vehicleVIN,
+		PublicKey:     publicKey,
+		RiskScore:     0,                // 初始风险评分为0
+		AccessLevel:   models.AccessLevelHighest, // 初始访问级别为1（最高权限）
+		Status:        models.StatusActive,       // 初始状态为活跃
+		AttackHistory: []models.Attack{},         // 初始攻击历史为空
+		CreatedAt:     txTime,
+		LastUpdatedAt: txTime,
+	}
+
+	// 创建可验证凭证
+	credential, err := utils.CreateVerifiableCredential(userInfo)
+	if err != nil {
+		return fmt.Errorf("创建可验证凭证失败: %v", err)
+	}
+	
+	// 将凭证序列化为JSON
+	credentialJSON, err := json.Marshal(credential)
+	if err != nil {
+		return fmt.Errorf("凭证序列化失败: %v", err)
+	}
+	
+	// 将凭证存储到用户信息中
+	userInfo.Credential = string(credentialJSON)
 
 	// 将用户信息转换为JSON并存储
 	userInfoJSON, err := json.Marshal(userInfo)
@@ -175,4 +261,89 @@ func (c *UserContract) GetAllUsers(ctx contractapi.TransactionContextInterface) 
 	}
 
 	return users, nil
+}
+
+// GetUserCredential 获取用户的可验证凭证
+func (c *UserContract) GetUserCredential(ctx contractapi.TransactionContextInterface, did string) (*models.VerifiableCredential, error) {
+	// 获取用户信息
+	userInfo, err := c.GetUser(ctx, did)
+	if err != nil {
+		return nil, err
+	}
+	
+	// 检查用户是否有凭证
+	if userInfo.Credential == "" {
+		return nil, fmt.Errorf("用户 %s 没有可验证凭证", did)
+	}
+	
+	// 反序列化凭证
+	var credential models.VerifiableCredential
+	err = json.Unmarshal([]byte(userInfo.Credential), &credential)
+	if err != nil {
+		return nil, fmt.Errorf("凭证反序列化失败: %v", err)
+	}
+	
+	return &credential, nil
+}
+
+// RevokeCredential 吊销用户凭证
+func (c *UserContract) RevokeCredential(ctx contractapi.TransactionContextInterface, did string) error {
+	// 获取用户信息
+	userInfo, err := c.GetUser(ctx, did)
+	if err != nil {
+		return err
+	}
+	
+	// 检查用户是否有凭证
+	if userInfo.Credential == "" {
+		return fmt.Errorf("用户 %s 没有可验证凭证", did)
+	}
+	
+	// 反序列化凭证
+	var credential models.VerifiableCredential
+	err = json.Unmarshal([]byte(userInfo.Credential), &credential)
+	if err != nil {
+		return fmt.Errorf("凭证反序列化失败: %v", err)
+	}
+	
+	// 更新凭证状态
+	credential.CredentialStatus.Type = models.CredentialStatusRevoked
+	
+	// 使用交易时间戳
+	timestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return fmt.Errorf("获取交易时间戳失败: %v", err)
+	}
+	txTime := time.Unix(timestamp.Seconds, int64(timestamp.Nanos))
+	
+	// 重新签名凭证
+	proof, err := utils.SignCredential(&credential)
+	if err != nil {
+		return fmt.Errorf("签名凭证失败: %v", err)
+	}
+	credential.Proof = *proof
+	
+	// 将凭证序列化为JSON
+	credentialJSON, err := json.Marshal(credential)
+	if err != nil {
+		return fmt.Errorf("凭证序列化失败: %v", err)
+	}
+	
+	// 更新用户信息
+	userInfo.Credential = string(credentialJSON)
+	userInfo.LastUpdatedAt = txTime
+	
+	// 将用户信息转换为JSON并存储
+	userInfoJSON, err := json.Marshal(userInfo)
+	if err != nil {
+		return fmt.Errorf("用户信息序列化失败: %v", err)
+	}
+	
+	// 将用户信息写入账本
+	err = ctx.GetStub().PutState(did, userInfoJSON)
+	if err != nil {
+		return fmt.Errorf("更新用户信息时出错: %v", err)
+	}
+	
+	return nil
 }

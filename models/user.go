@@ -9,6 +9,11 @@ type UserInfo struct {
 	DID           string    `json:"did"`           // 用户的分布式身份标识符
 	Name          string    `json:"name"`          // 用户姓名
 	IDNumber      string    `json:"idNumber"`      // 身份证号
+	PhoneNumber   string    `json:"phoneNumber"`   // 电话号码
+	VehiclePlate  string    `json:"vehiclePlate"`  // 车牌信息
+	VehicleModel  string    `json:"vehicleModel"`  // 车辆型号
+	VehicleColor  string    `json:"vehicleColor"`  // 车辆颜色
+	VehicleVIN    string    `json:"vehicleVIN"`    // 车辆识别号
 	PublicKey     string    `json:"publicKey"`     // 用户公钥
 	RiskScore     int       `json:"riskScore"`     // 用户风险评分 (0-100, 0表示无风险，100表示最高风险)
 	AccessLevel   int       `json:"accessLevel"`   // 用户访问级别 (1-5, 1表示最高权限，5表示最低权限)
@@ -16,6 +21,7 @@ type UserInfo struct {
 	AttackHistory []Attack  `json:"attackHistory"` // 攻击历史记录
 	CreatedAt     time.Time `json:"createdAt"`     // 创建时间
 	LastUpdatedAt time.Time `json:"lastUpdatedAt"` // 最后更新时间
+	Credential    string    `json:"credential"`    // 用户可验证凭证（JSON格式存储）
 }
 
 // Attack 攻击记录结构体
