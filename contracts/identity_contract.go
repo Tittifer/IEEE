@@ -15,6 +15,8 @@ type IdentityContract struct {
 	contractapi.Contract
 }
 
+// 引用风险合约中的常量
+
 // InitLedger 初始化账本
 func (c *IdentityContract) InitLedger(ctx contractapi.TransactionContextInterface) error {
 	fmt.Println("身份认证链码初始化")
@@ -46,13 +48,10 @@ func (c *IdentityContract) RegisterUser(ctx contractapi.TransactionContextInterf
 	// 计算初始风险值
 	initialRiskScore := utils.CalculateInitialRiskScore()
 	
-	// 创建新用户
+	// 创建新用户 - 只存储必要的信息
 	userInfo := models.UserInfo{
 		DID:           did,
 		Name:          name,
-		IDNumber:      idNumber,
-		PhoneNumber:   phoneNumber,
-		VehicleID:     vehicleID,
 		RiskScore:     initialRiskScore,
 		Status:        models.StatusActive,
 		CreatedAt:     timeStr,
@@ -112,17 +111,15 @@ func (c *IdentityContract) UserExists(ctx contractapi.TransactionContextInterfac
 	return userInfoJSON != nil, nil
 }
 
-// GetUserByInfo 根据用户信息获取用户
-func (c *IdentityContract) GetUserByInfo(ctx contractapi.TransactionContextInterface, name, idNumber, phoneNumber, vehicleID string) (*models.UserInfo, error) {
+// GetDIDByInfo 根据用户信息生成DID
+func (c *IdentityContract) GetDIDByInfo(ctx contractapi.TransactionContextInterface, name, idNumber, phoneNumber, vehicleID string) (string, error) {
 	// 根据用户信息生成DID
 	did := utils.GenerateDID(name, idNumber, phoneNumber, vehicleID)
-	
-	// 调用GetUser函数获取用户信息
-	return c.GetUser(ctx, did)
+	return did, nil
 }
 
 // VerifyIdentity 验证用户身份
-func (c *IdentityContract) VerifyIdentity(ctx contractapi.TransactionContextInterface, did, name, idNumber, phoneNumber, vehicleID string) (bool, error) {
+func (c *IdentityContract) VerifyIdentity(ctx contractapi.TransactionContextInterface, did, name string) (bool, error) {
 	// 验证DID格式
 	if !utils.ValidateDID(did) {
 		return false, fmt.Errorf("无效的DID格式: %s", did)
@@ -134,11 +131,8 @@ func (c *IdentityContract) VerifyIdentity(ctx contractapi.TransactionContextInte
 		return false, err
 	}
 	
-	// 验证用户信息是否匹配
-	if userInfo.Name != name || 
-	   userInfo.IDNumber != idNumber || 
-	   userInfo.PhoneNumber != phoneNumber || 
-	   userInfo.VehicleID != vehicleID {
+	// 验证用户姓名是否匹配
+	if userInfo.Name != name {
 		return false, nil
 	}
 	
@@ -148,6 +142,52 @@ func (c *IdentityContract) VerifyIdentity(ctx contractapi.TransactionContextInte
 	}
 	
 	return true, nil
+}
+
+// UserLogin 用户登录
+func (c *IdentityContract) UserLogin(ctx contractapi.TransactionContextInterface, did, name string) (string, error) {
+	// 验证DID格式
+	if !utils.ValidateDID(did) {
+		return "", fmt.Errorf("无效的DID格式: %s", did)
+	}
+	
+	// 获取用户信息
+	userInfoJSON, err := ctx.GetStub().GetState(did)
+	if err != nil {
+		return "", fmt.Errorf("读取用户信息时出错: %v", err)
+	}
+	if userInfoJSON == nil {
+		// 用户不存在，返回登录失败信息
+		return "登录失败：用户不存在", nil
+	}
+	
+	// 反序列化用户信息
+	var userInfo models.UserInfo
+	err = json.Unmarshal(userInfoJSON, &userInfo)
+	if err != nil {
+		return "", fmt.Errorf("用户信息反序列化失败: %v", err)
+	}
+	
+	// 验证用户姓名是否匹配
+	if userInfo.Name != name {
+		// 姓名不匹配，返回登录失败信息
+		return "登录失败：用户名不匹配", nil
+	}
+	
+	// 验证用户状态是否为活跃
+	if userInfo.Status != models.StatusActive {
+		// 用户状态不活跃，返回登录失败信息
+		return "登录失败：用户状态不活跃", nil
+	}
+	
+	// 检查用户风险评分
+	if userInfo.RiskScore > models.RiskScoreThreshold {
+		// 风险评分过高，禁止登录
+		return "禁止用户登录", nil
+	}
+	
+	// 登录成功
+	return "登录成功", nil
 }
 
 // GetAllUsers 获取所有用户

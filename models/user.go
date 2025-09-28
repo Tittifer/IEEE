@@ -4,9 +4,6 @@ package models
 type UserInfo struct {
 	DID           string `json:"did"`           // 用户的分布式身份标识符
 	Name          string `json:"name"`          // 用户姓名
-	IDNumber      string `json:"idNumber"`      // 身份证号
-	PhoneNumber   string `json:"phoneNumber"`   // 电话号码
-	VehicleID     string `json:"vehicleID"`     // 车辆标识号
 	RiskScore     int    `json:"riskScore"`     // 用户风险评分 (0-100)
 	Status        string `json:"status"`        // 用户状态: active
 	CreatedAt     string `json:"createdAt"`     // 创建时间
@@ -18,7 +15,8 @@ const (
 	StatusActive = "active"
 )
 
-// 初始风险值
+// 风险评分相关常量
 const (
-	InitialRiskScore = 0 // 初始风险评分
+	InitialRiskScore   = 0  // 初始风险评分
+	RiskScoreThreshold = 50 // 风险评分阈值，超过此值将禁止用户登录
 )
