@@ -8,18 +8,18 @@ import (
 )
 
 func main() {
-	// 创建智能合约
-	powerGridContract := new(contracts.PowerGridContract)
+	// 创建身份认证合约
+	identityContract := new(contracts.IdentityContract)
 	
 	// 创建链码
-	chaincode, err := contractapi.NewChaincode(powerGridContract)
+	chaincode, err := contractapi.NewChaincode(identityContract)
 	if err != nil {
-		fmt.Printf("创建电网身份认证链码时出错: %s", err.Error())
+		fmt.Printf("创建身份认证链码时出错: %s", err.Error())
 		return
 	}
 
 	// 启动链码
 	if err := chaincode.Start(); err != nil {
-		fmt.Printf("启动电网身份认证链码时出错: %s", err.Error())
+		fmt.Printf("启动身份认证链码时出错: %s", err.Error())
 	}
 }

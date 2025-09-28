@@ -10,65 +10,81 @@
 source env.sh
 ```
 
-## 用户管理命令
+## 链码基本命令
 
-### 注册新用户
-
-```bash
-peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C mychannel -n powercc --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"RegisterUser","Args":["did:example:123", "张三", "110101199001011234", "公钥内容..."]}'
-```
-
-### 获取用户信息
+### 初始化账本
 
 ```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"GetUser","Args":["did:example:123"]}'
+peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C mychannel -n powercc --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"InitLedger","Args":[]}'
 ```
 
-### 验证用户身份
+## 用户身份管理命令 (IdentityContract)
+
+### 注册新用户 (RegisterUser)
 
 ```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"VerifyUser","Args":["did:example:123"]}'
+peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C mychannel -n powercc --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"RegisterUser","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}'
 ```
 
-### 更改用户状态
+### 获取用户信息 (GetUser)
 
 ```bash
-peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C mychannel -n powercc --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"ChangeUserStatus","Args":["did:example:123", "suspended"]}'
+peer chaincode query -C mychannel -n powercc -c '{"function":"GetUser","Args":["did:example:123456789abcdef0"]}'
 ```
 
-### 获取所有用户
+### 根据用户信息获取用户 (GetUserByInfo)
+
+```bash
+peer chaincode query -C mychannel -n powercc -c '{"function":"GetUserByInfo","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}'
+```
+
+### 验证用户身份 (VerifyIdentity)
+
+```bash
+peer chaincode query -C mychannel -n powercc -c '{"function":"VerifyIdentity","Args":["did:example:123456789abcdef0", "张三", "110101199001011234", "13800138000", "京A12345"]}'
+```
+
+### 检查用户是否存在 (UserExists)
+
+```bash
+peer chaincode query -C mychannel -n powercc -c '{"function":"UserExists","Args":["did:example:123456789abcdef0"]}'
+```
+
+### 获取所有用户 (GetAllUsers)
 
 ```bash
 peer chaincode query -C mychannel -n powercc -c '{"function":"GetAllUsers","Args":[]}'
 ```
 
-## 风险管理命令
+## 工具函数相关命令
 
-### 记录攻击行为
+以下命令展示了如何使用链码中的工具函数：
 
-```bash
-peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C mychannel -n powercc --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"RecordAttack","Args":["did:example:123", "honeypot001", "SQL注入", "尝试通过SQL注入获取数据库访问权限", "8"]}'
+### 生成DID (GenerateDID)
+
+这是链码内部使用的函数，通过以下参数生成：
+
+```
+did:example:<用户信息的SHA-256哈希前16位>
 ```
 
-### 更新风险评分
+例如，用户信息 "张三", "110101199001011234", "13800138000", "京A12345" 将生成唯一的DID。
+
+### 验证DID格式 (ValidateDID)
+
+DID格式必须符合 `did:example:<至少16位标识符>` 的格式。
+
+## 测试与部署
+
+### 部署链码
+
+使用项目根目录下的deploy.sh脚本部署链码：
 
 ```bash
-peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C mychannel -n powercc --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"UpdateRiskScore","Args":["did:example:123", "50"]}'
+./deploy.sh
 ```
 
-### 获取高风险用户
-
-```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"GetHighRiskUsers","Args":[]}'
-```
-
-### 获取特定风险评分范围内的用户
-
-```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"GetUsersByRiskScore","Args":["40", "70"]}'
-```
-
-## 关闭网络
+### 关闭网络
 
 当测试完成后，可以使用以下命令关闭网络：
 

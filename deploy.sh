@@ -1,10 +1,4 @@
 #!/bin/bash
-# 设置默认环境变量，避免GVM_DEBUG未绑定错误
-GVM_DEBUG=0
-GVM_ROOT=$HOME/.gvm
-PATH=$PATH:$HOME/.gvm/bin
-export GVM_DEBUG GVM_ROOT PATH
-
 # 忽略未定义变量的错误
 set +u
 
@@ -183,6 +177,7 @@ deploy_chaincode() {
   
   print_info "链码名称: $CHAINCODE_NAME"
   print_info "链码路径: $CHAINCODE_PATH"
+  print_info "链码版本: $CHAINCODE_VERSION"
   
   # 进入test-network目录
   cd "$FABRIC_SAMPLES_PATH/test-network" || {
@@ -205,6 +200,75 @@ deploy_chaincode() {
   cd "$CURRENT_DIR"
   
   print_info "链码已成功部署"
+}
+
+# 升级链码
+upgrade_chaincode() {
+  if [ -z "$1" ]; then
+    print_error "请指定新的链码版本号"
+    exit 1
+  fi
+  
+  print_info "开始升级链码..."
+  
+  # 保存当前目录
+  CURRENT_DIR=$(pwd)
+  
+  # 链码名称和路径
+  CHAINCODE_NAME="powercc"
+  CHAINCODE_PATH=$(pwd)
+  CHAINCODE_VERSION="$1"
+  
+  print_info "链码名称: $CHAINCODE_NAME"
+  print_info "链码路径: $CHAINCODE_PATH"
+  print_info "链码新版本: $CHAINCODE_VERSION"
+  
+  # 进入test-network目录
+  cd "$FABRIC_SAMPLES_PATH/test-network" || {
+    print_error "无法进入目录: $FABRIC_SAMPLES_PATH/test-network"
+    exit 1
+  }
+  
+  # 获取当前链码序列号
+  print_info "获取当前链码序列号..."
+  
+  # 设置环境变量
+  export PATH=${PWD}/../bin:$PATH
+  export FABRIC_CFG_PATH=$PWD/../config/
+  export CORE_PEER_TLS_ENABLED=true
+  export CORE_PEER_LOCALMSPID="Org1MSP"
+  export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
+  export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
+  export CORE_PEER_ADDRESS=localhost:7051
+  
+  # 查询当前链码信息
+  CURRENT_SEQUENCE=$(peer lifecycle chaincode querycommitted -C mychannel -n "$CHAINCODE_NAME" 2>/dev/null | grep -o "Sequence: [0-9]*" | cut -d' ' -f2)
+  
+  if [ -z "$CURRENT_SEQUENCE" ]; then
+    print_error "无法获取当前链码序列号，请确保链码已部署"
+    cd "$CURRENT_DIR"
+    exit 1
+  fi
+  
+  # 计算新的序列号
+  NEW_SEQUENCE=$((CURRENT_SEQUENCE + 1))
+  print_info "当前序列号: $CURRENT_SEQUENCE, 新序列号: $NEW_SEQUENCE"
+  
+  # 升级链码
+  print_info "正在升级链码，这可能需要几分钟时间..."
+  ./network.sh deployCC -ccn "$CHAINCODE_NAME" -ccp "$CHAINCODE_PATH" -ccl go -ccv "$CHAINCODE_VERSION" -ccs "$NEW_SEQUENCE" -verbose
+  
+  UPGRADE_RESULT=$?
+  if [ $UPGRADE_RESULT -ne 0 ]; then
+    print_error "升级链码失败，退出码: $UPGRADE_RESULT"
+    cd "$CURRENT_DIR"
+    exit 1
+  fi
+  
+  # 返回原目录
+  cd "$CURRENT_DIR"
+  
+  print_info "链码已成功升级到版本 $CHAINCODE_VERSION, 序列号: $NEW_SEQUENCE"
 }
 
 # 设置环境变量以便与链码交互
@@ -480,6 +544,7 @@ show_help() {
   echo "  -n, --network   只启动网络，不部署链码"
   echo "  -d, --deploy    只部署链码，不启动网络"
   echo "  -t, --test      只测试链码，不启动网络和部署"
+  echo "  -u, --upgrade   升级链码（指定新版本号）"
   echo ""
   echo "示例:"
   echo "  $0                         # 执行完整部署流程"
@@ -487,6 +552,7 @@ show_help() {
   echo "  $0 --clean                 # 清理环境"
   echo "  $0 --network               # 只启动网络"
   echo "  $0 --deploy                # 只部署链码"
+  echo "  $0 --upgrade 1.1           # 升级链码到版本1.1"
 }
 
 # 主函数
@@ -498,6 +564,8 @@ main() {
   NETWORK_ONLY=false
   DEPLOY_ONLY=false
   TEST_ONLY=false
+  UPGRADE_ONLY=false
+  UPGRADE_VERSION=""
   
   while [[ $# -gt 0 ]]; do
     case $1 in
@@ -520,6 +588,18 @@ main() {
       -t|--test)
         TEST_ONLY=true
         shift
+        ;;
+      -u|--upgrade)
+        UPGRADE_ONLY=true
+        shift
+        if [[ $# -gt 0 ]]; then
+          UPGRADE_VERSION="$1"
+          shift
+        else
+          print_error "升级选项需要指定版本号"
+          show_help
+          exit 1
+        fi
         ;;
       *)
         FABRIC_SAMPLES_PATH="$1"
@@ -568,6 +648,15 @@ main() {
     setup_environment
     init_chaincode
     print_info "链码已部署并初始化"
+    exit 0
+  fi
+  
+  # 如果只升级链码
+  if [ "$UPGRADE_ONLY" = true ]; then
+    print_info "只升级链码..."
+    upgrade_chaincode "$UPGRADE_VERSION"
+    setup_environment
+    print_info "链码已升级到版本 $UPGRADE_VERSION"
     exit 0
   fi
   
