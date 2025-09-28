@@ -37,7 +37,7 @@ func (c *IdentityContract) RegisterUser(ctx contractapi.TransactionContextInterf
 		return fmt.Errorf("用户DID %s 已存在", did)
 	}
 
-	// 使用交易时间戳而不是当前时间，确保确定性
+	// 使用交易时间戳确保确定性
 	timestamp, err := ctx.GetStub().GetTxTimestamp()
 	if err != nil {
 		return fmt.Errorf("获取交易时间戳失败: %v", err)
@@ -48,7 +48,7 @@ func (c *IdentityContract) RegisterUser(ctx contractapi.TransactionContextInterf
 	// 计算初始风险值
 	initialRiskScore := utils.CalculateInitialRiskScore()
 	
-	// 创建新用户 - 只存储必要的信息
+	// 创建新用户
 	userInfo := models.UserInfo{
 		DID:           did,
 		Name:          name,
