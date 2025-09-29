@@ -26,14 +26,14 @@ cd ../mainchain
 ### 1. 初始化账本
 
 ```bash
-docker exec peer0.org1.mainchain.com peer chaincode invoke \
-  -o localhost:8051 \
+docker exec cli_mainchain peer chaincode invoke \
+  -o orderer.mainchain.com:8050 \
   --tls \
-  --cafile /etc/hyperledger/fabric/msp/tlscacerts/tlsca.mainchain.com-cert.pem \
+  --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem \
   -C mainchannel \
   -n mainchaincc \
   --peerAddresses peer0.org1.mainchain.com:8051 \
-  --tlsRootCertFiles /etc/hyperledger/fabric/tls/ca.crt \
+  --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt \
   -c '{"function":"InitLedger","Args":[]}' \
   --waitForEvent
 ```
@@ -42,13 +42,13 @@ docker exec peer0.org1.mainchain.com peer chaincode invoke \
 
 ```bash
 docker exec cli_mainchain peer chaincode invoke \
-  -o localhost:8050 \
+  -o orderer.mainchain.com:8050 \
   --tls \
-  --cafile /etc/hyperledger/fabric/msp/tlscacerts/tlsca.org1.mainchain.com-cert.pem\
+  --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem \
   -C mainchannel \
   -n mainchaincc \
   --peerAddresses peer0.org1.mainchain.com:8051 \
-  --tlsRootCertFiles /etc/hyperledger/fabric/tls/ca.crt \
+  --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt \
   -c '{"function":"RegisterUser","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}' \
   --waitForEvent
 ```
@@ -59,7 +59,7 @@ docker exec cli_mainchain peer chaincode invoke \
 docker exec cli_mainchain peer chaincode query \
   -C mainchannel \
   -n mainchaincc \
-  -c '{"function":"GetDIDByInfo","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}'
+  -c "{\"function\":\"GetDIDByInfo\",\"Args\":[\"张三\", \"110101199001011234\", \"13800138000\", \"京A12345\"]}"
 ```
 
 ### 4. 查询用户信息
@@ -69,7 +69,7 @@ docker exec cli_mainchain peer chaincode query \
 DID=$(docker exec cli_mainchain peer chaincode query \
   -C mainchannel \
   -n mainchaincc \
-  -c '{"function":"GetDIDByInfo","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}' 2>/dev/null)
+  -c "{\"function\":\"GetDIDByInfo\",\"Args\":[\"张三\", \"110101199001011234\", \"13800138000\", \"京A12345\"]}" 2>/dev/null)
 
 # 使用DID查询用户信息
 docker exec cli_mainchain peer chaincode query \
@@ -103,7 +103,7 @@ docker exec cli_mainchain peer chaincode query \
 docker exec cli_mainchain peer chaincode query \
   -C mainchannel \
   -n mainchaincc \
-  -c '{"function":"GetAllUsers","Args":[]}'
+  -c "{\"function\":\"GetAllUsers\",\"Args\":[]}"
 ```
 
 ## 使用mainchain_cli.sh简化命令
@@ -120,11 +120,18 @@ cd ../mainchain_docker
 ./mainchain_cli.sh invoke RegisterUser 李四 110101199001012345 13900139000 京B12345
 ```
 
+注意：如果使用mainchain_cli.sh脚本，确保脚本中的函数调用使用双引号和转义，如下所示：
+```bash
+docker exec cli_mainchain peer chaincode query -C $CHANNEL_NAME -n $CHAINCODE_NAME -c "{\"function\":\"$FUNC_NAME\",\"Args\":$ARGS}"
+```
+
 ## 常见错误及解决方法
 
 1. **找不到证书文件**：确保证书路径正确，可以使用绝对路径
-2. **链码调用失败**：检查函数名和参数是否正确
+2. **链码调用失败**：检查函数名和参数是否正确，特别注意JSON格式的正确性和引号的转义
 3. **网络连接问题**：确保网络已启动并且容器正在运行
+4. **链码容器启动失败**：检查docker网络配置，特别是`CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE`环境变量是否正确设置
+5. **链码超时错误**：可能需要增加链码启动超时时间，修改peer节点的core.yaml文件中的`startuptimeout`参数
 
 ## 调试技巧
 
@@ -138,10 +145,34 @@ CHAINCODE_CONTAINER=$(docker ps -a | grep mainchaincc | head -n 1 | awk '{print 
 docker logs $CHAINCODE_CONTAINER
 ```
 
-查看peer日志：
+查看peer节点日志：
 
 ```bash
+# 查看peer0节点日志
 docker logs peer0.org1.mainchain.com
+
+# 查看peer0节点错误日志
+docker logs peer0.org1.mainchain.com 2>&1 | grep -i error | tail -n 20
+```
+
+检查网络配置：
+
+```bash
+# 查看docker网络列表
+docker network ls | grep mainchain
+
+# 检查网络详情
+docker network inspect mainchain_docker_mainchain_network
+```
+
+检查链码容器网络配置：
+
+```bash
+# 获取链码容器ID
+CHAINCODE_CONTAINER=$(docker ps -a | grep mainchaincc | head -n 1 | awk '{print $1}')
+
+# 检查容器网络配置
+docker inspect $CHAINCODE_CONTAINER | grep -A 20 "NetworkSettings"
 ```
 
 

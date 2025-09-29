@@ -66,7 +66,7 @@ services:
       - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
       - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
       - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
-      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=docker_mainchain_network
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=mainchain_docker_mainchain_network
     working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
     command: peer node start
     volumes:
@@ -103,7 +103,7 @@ services:
       - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
       - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
       - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
-      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=docker_mainchain_network
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=mainchain_docker_mainchain_network
     working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
     command: peer node start
     volumes:
