@@ -1,785 +1,511 @@
 #!/bin/bash
-# 忽略未定义变量的错误
-set +u
+#
+# 主链部署脚本 - 用于部署和测试IEEE主链链码
+#
 
-# 部署脚本 - 一键启动Mainchain网络并部署链码
-# 作者: IEEE链码团队
-# 版本: 2.0
-# 
-# 使用方法:
-# ./deploy.sh
-# 
-# 示例:
-# ./deploy.sh
+# 获取脚本所在目录
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+NETWORK_DIR=${SCRIPT_DIR}/../mainchain_docker
+CHAINCODE_DIR=${SCRIPT_DIR}
 
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-NC='\033[0m' # No Color
+# 设置环境变量
+export PATH=/home/yxt/fabric-samples/bin:$PATH
+# 初始设置FABRIC_CFG_PATH，不同操作会临时修改此变量
+export FABRIC_CFG_PATH=/home/yxt/fabric-samples/config
 
-# 打印彩色信息
-print_info() {
-  echo -e "${GREEN}[INFO] $1${NC}"
+# 定义颜色
+C_RESET='\033[0m'
+C_RED='\033[0;31m'
+C_GREEN='\033[0;32m'
+C_BLUE='\033[0;34m'
+C_YELLOW='\033[0;33m'
+
+# 定义链码相关变量
+CHANNEL_NAME="mainchannel"
+CHAINCODE_NAME="mainchaincc"
+CHAINCODE_VERSION="1.0"
+CHAINCODE_SEQUENCE="1"
+CHAINCODE_INIT_REQUIRED="false"
+CHAINCODE_LANGUAGE="golang"
+CHAINCODE_LABEL="${CHAINCODE_NAME}_${CHAINCODE_VERSION}"
+
+# 命令行参数标志
+START_NETWORK=false
+DEPLOY_CHAINCODE=false
+CLEAN_NETWORK=false
+TEST_CHAINCODE=false
+
+# 打印信息函数
+function infoln() {
+  echo -e "${C_BLUE}${1}${C_RESET}"
 }
 
-print_warn() {
-  echo -e "${YELLOW}[WARN] $1${NC}"
+function errorln() {
+  echo -e "${C_RED}${1}${C_RESET}"
 }
 
-print_error() {
-  echo -e "${RED}[ERROR] $1${NC}"
+function successln() {
+  echo -e "${C_GREEN}${1}${C_RESET}"
 }
 
-# 检查必要工具
-check_prerequisites() {
-  print_info "检查必要组件..."
+function warnln() {
+  echo -e "${C_YELLOW}${1}${C_RESET}"
+}
+
+# 检查必要的二进制文件
+function checkPrereqs() {
+  infoln "检查必要的二进制文件..."
   
-  # 检查Docker
-  if ! command -v docker &> /dev/null; then
-    print_error "未安装Docker，请先安装Docker"
-    exit 1
-  fi
-  
-  # 检查Docker是否正在运行
-  if ! docker info &> /dev/null; then
-    print_error "Docker未启动，请先启动Docker服务"
-    exit 1
-  fi
-  
-  # 检查Docker Compose
-  if ! command -v docker compose &> /dev/null; then
-    if ! command -v docker-compose &> /dev/null; then
-      print_error "未安装Docker Compose，请先安装Docker Compose"
-      exit 1
+  ## 检查peer二进制文件
+  if ! command -v peer &> /dev/null; then
+    warnln "找不到peer二进制文件，尝试使用绝对路径"
+    if [ -f "/home/yxt/fabric-samples/bin/peer" ]; then
+      export PATH=/home/yxt/fabric-samples/bin:$PATH
+      infoln "已添加fabric-samples/bin到PATH"
     else
-      print_warn "检测到旧版Docker Compose，建议升级到新版"
+      errorln "在/home/yxt/fabric-samples/bin中找不到peer二进制文件"
+      errorln "请确保Hyperledger Fabric已正确安装"
+      exit 1
     fi
   fi
   
-  # 检查Go
-  if ! command -v go &> /dev/null; then
-    print_error "未安装Go，请先安装Go 1.18或更高版本"
+  ## 再次检查peer是否可用
+  if ! command -v peer &> /dev/null; then
+    errorln "无法找到peer二进制文件，请检查安装路径"
     exit 1
   fi
   
-  # 检查fabric-samples目录
-  if [ -n "$1" ]; then
-    FABRIC_SAMPLES_PATH="$1"
-  else
-    FABRIC_SAMPLES_PATH=${FABRIC_SAMPLES_PATH:-"$HOME/fabric-samples"}
-  fi
-  
-  if [ ! -d "$FABRIC_SAMPLES_PATH" ]; then
-    print_error "未找到fabric-samples目录: $FABRIC_SAMPLES_PATH"
-    print_info "可以通过以下命令安装fabric-samples:"
-    print_info "curl -sSL https://bit.ly/2ysbOFE | bash -s -- 2.4.7 1.5.2"
+  ## 检查docker
+  if ! command -v docker &> /dev/null; then
+    errorln "找不到docker命令，请安装docker"
     exit 1
   fi
   
-  # 检查test-network目录
-  if [ ! -d "$FABRIC_SAMPLES_PATH/test-network" ]; then
-    print_error "在 $FABRIC_SAMPLES_PATH 中未找到test-network目录"
+  ## 检查docker-compose
+  if ! command -v docker-compose &> /dev/null; then
+    errorln "找不到docker-compose命令，请安装docker-compose"
     exit 1
   fi
   
-  # 检查network.sh脚本
-  if [ ! -f "$FABRIC_SAMPLES_PATH/test-network/network.sh" ]; then
-    print_error "在 $FABRIC_SAMPLES_PATH/test-network 中未找到network.sh脚本"
-    exit 1
-  fi
-  
-  # 确保network.sh有执行权限
-  chmod +x "$FABRIC_SAMPLES_PATH/test-network/network.sh"
-  
-  print_info "所有必要组件已就绪"
-  print_info "使用的fabric-samples路径: $FABRIC_SAMPLES_PATH"
+  successln "所有必要的二进制文件已找到"
 }
 
-# 清理Docker环境
-clean_docker() {
-  print_info "清理Docker环境..."
+# 启动网络
+function networkUp() {
+  infoln "启动Hyperledger Fabric网络..."
   
-  # 停止所有运行中的容器
-  if [ "$(docker ps -q)" ]; then
-    docker stop $(docker ps -q)
-  fi
+  # 临时设置FABRIC_CFG_PATH为网络配置目录
+  local PREV_CFG_PATH=$FABRIC_CFG_PATH
+  export FABRIC_CFG_PATH=${NETWORK_DIR}/configtx
   
-  # 删除所有容器
-  if [ "$(docker ps -a -q)" ]; then
-    docker rm -f $(docker ps -a -q)
-  fi
-  
-  # 清理卷和网络
-  docker volume prune -f
-  docker network prune -f
-  
-  print_info "Docker环境已清理"
-}
-
-# 启动Mainchain网络
-start_network() {
-  print_info "启动Mainchain网络..."
-  
-  # 保存当前目录
-  CURRENT_DIR=$(pwd)
-  
-  # 进入docker目录
-  cd "$(dirname "$0")/../mainchain_docker" || {
-    print_error "无法进入目录: $(dirname "$0")/../mainchain_docker"
-    exit 1
-  }
-  
-  # 如果网络已经运行，先关闭
-  print_info "关闭可能正在运行的网络..."
-  chmod +x network.sh
-  ./network.sh down
-  
-  # 清理Docker环境，确保没有冲突
-  clean_docker
-  
-  # 启动网络
-  print_info "启动新网络..."
+  cd ${NETWORK_DIR}
   ./network.sh up
   
   if [ $? -ne 0 ]; then
-    print_error "启动网络失败"
-    cd "$CURRENT_DIR"
+    errorln "启动网络失败"
+    # 恢复原来的FABRIC_CFG_PATH
+    export FABRIC_CFG_PATH=$PREV_CFG_PATH
     exit 1
   fi
   
-  # 返回原目录
-  cd "$CURRENT_DIR"
+  # 恢复原来的FABRIC_CFG_PATH
+  export FABRIC_CFG_PATH=$PREV_CFG_PATH
   
-  print_info "Mainchain网络已成功启动"
+  successln "网络启动成功"
 }
 
-# 部署链码
-deploy_chaincode() {
-  print_info "开始部署链码..."
+# 关闭网络
+function networkDown() {
+  infoln "关闭Hyperledger Fabric网络..."
   
-  # 保存当前目录
-  CURRENT_DIR=$(pwd)
+  # 临时设置FABRIC_CFG_PATH为网络配置目录
+  local PREV_CFG_PATH=$FABRIC_CFG_PATH
+  export FABRIC_CFG_PATH=${NETWORK_DIR}/configtx
   
-  # 链码名称和路径
-  CHAINCODE_NAME="mainchaincc"
-  CHAINCODE_PATH=$(pwd)
-  CHAINCODE_VERSION="1.0"
+  cd ${NETWORK_DIR}
+  ./network.sh down
   
-  print_info "链码名称: $CHAINCODE_NAME"
-  print_info "链码路径: $CHAINCODE_PATH"
-  print_info "链码版本: $CHAINCODE_VERSION"
-  
-  # 进入docker目录
-  cd "$(dirname "$0")/../mainchain_docker" || {
-    print_error "无法进入目录: $(dirname "$0")/../mainchain_docker"
-    exit 1
-  }
-  
-  # 确保CLI容器正在运行
-  if ! docker ps | grep -q "cli_mainchain"; then
-    print_error "CLI容器未运行，请确保网络已启动"
-    cd "$CURRENT_DIR"
+  if [ $? -ne 0 ]; then
+    errorln "关闭网络失败"
+    # 恢复原来的FABRIC_CFG_PATH
+    export FABRIC_CFG_PATH=$PREV_CFG_PATH
     exit 1
   fi
   
-  # 部署链码
-  print_info "正在部署链码，这可能需要几分钟时间..."
+  # 恢复原来的FABRIC_CFG_PATH
+  export FABRIC_CFG_PATH=$PREV_CFG_PATH
   
-  # 打包链码
-  print_info "打包链码..."
-  docker exec cli_mainchain peer lifecycle chaincode package /opt/gopath/src/github.com/hyperledger/fabric/peer/${CHAINCODE_NAME}.tar.gz --path /opt/gopath/src/github.com/Tittifer/IEEE --lang golang --label ${CHAINCODE_NAME}_${CHAINCODE_VERSION}
+  successln "网络已关闭"
+}
+
+# 打包链码
+function packageChaincode() {
+  infoln "打包链码..."
   
-  # 安装链码到peer0
-  print_info "安装链码到peer0.org1.mainchain.com..."
-  docker exec cli_mainchain peer lifecycle chaincode install /opt/gopath/src/github.com/hyperledger/fabric/peer/${CHAINCODE_NAME}.tar.gz
+  # 确保当前目录是链码目录
+  cd ${CHAINCODE_DIR}
   
-  # 获取链码ID
-  print_info "获取链码ID..."
-  CC_PACKAGE_ID=$(docker exec cli_mainchain peer lifecycle chaincode queryinstalled | grep "${CHAINCODE_NAME}_${CHAINCODE_VERSION}" | awk '{print $3}' | sed 's/,$//')
+  # 检查core.yaml文件是否存在
+  if [ ! -f "$FABRIC_CFG_PATH/core.yaml" ]; then
+    warnln "在 $FABRIC_CFG_PATH 中找不到core.yaml文件"
+    
+    # 尝试在fabric-samples目录中找到core.yaml
+    if [ -f "/home/yxt/fabric-samples/config/core.yaml" ]; then
+      export FABRIC_CFG_PATH=/home/yxt/fabric-samples/config
+      infoln "已设置FABRIC_CFG_PATH为: $FABRIC_CFG_PATH"
+    else
+      errorln "找不到core.yaml配置文件，无法打包链码"
+      exit 1
+    fi
+  fi
   
-  if [ -z "$CC_PACKAGE_ID" ]; then
-    print_error "无法获取链码ID"
-    cd "$CURRENT_DIR"
+  # 创建chaincode.tar.gz包
+  peer lifecycle chaincode package ${CHAINCODE_NAME}.tar.gz \
+    --path ${CHAINCODE_DIR} \
+    --lang ${CHAINCODE_LANGUAGE} \
+    --label ${CHAINCODE_LABEL}
+  
+  if [ $? -ne 0 ]; then
+    errorln "打包链码失败"
     exit 1
   fi
   
-  print_info "链码ID: $CC_PACKAGE_ID"
+  successln "链码打包成功: ${CHAINCODE_NAME}.tar.gz"
+}
+
+# 安装链码
+function installChaincode() {
+  infoln "安装链码到节点..."
   
-  # 批准链码
-  print_info "批准链码定义..."
-  docker exec cli_mainchain peer lifecycle chaincode approveformyorg -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem --channelID mainchannel --name ${CHAINCODE_NAME} --version ${CHAINCODE_VERSION} --package-id ${CC_PACKAGE_ID} --sequence 1
+  # 复制链码包到CLI容器
+  docker cp ${CHAINCODE_DIR}/${CHAINCODE_NAME}.tar.gz cli_mainchain:/opt/gopath/src/github.com/hyperledger/fabric/peer/${CHAINCODE_NAME}.tar.gz
+  
+  if [ $? -ne 0 ]; then
+    errorln "复制链码包到CLI容器失败"
+    exit 1
+  fi
+  
+  # 安装链码到peer0.org1
+  docker exec cli_mainchain peer lifecycle chaincode install ${CHAINCODE_NAME}.tar.gz
+  
+  if [ $? -ne 0 ]; then
+    errorln "在peer0.org1上安装链码失败"
+    exit 1
+  fi
+  
+  # 安装链码到peer1.org1
+  docker exec -e CORE_PEER_ADDRESS=peer1.org1.mainchain.com:8061 \
+          -e CORE_PEER_TLS_CERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer1.org1.mainchain.com/tls/server.crt \
+          -e CORE_PEER_TLS_KEY_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer1.org1.mainchain.com/tls/server.key \
+          -e CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer1.org1.mainchain.com/tls/ca.crt \
+          cli_mainchain peer lifecycle chaincode install ${CHAINCODE_NAME}.tar.gz
+  
+  if [ $? -ne 0 ]; then
+    errorln "在peer1.org1上安装链码失败"
+    exit 1
+  fi
+  
+  successln "链码安装成功"
+}
+
+# 获取已安装的链码包ID
+function getInstalledPackageID() {
+  infoln "获取已安装的链码包ID..."
+  
+  PACKAGE_ID=$(docker exec cli_mainchain peer lifecycle chaincode queryinstalled | grep ${CHAINCODE_LABEL} | awk '{print $3}' | sed 's/,$//')
+  
+  if [ -z "$PACKAGE_ID" ]; then
+    errorln "无法获取链码包ID"
+    exit 1
+  fi
+  
+  successln "链码包ID: ${PACKAGE_ID}"
+}
+
+# 批准链码定义
+function approveChaincode() {
+  infoln "批准链码定义..."
+  
+  # 获取链码包ID
+  getInstalledPackageID
+  
+  # Org1批准链码
+  docker exec cli_mainchain peer lifecycle chaincode approveformyorg \
+    -o orderer.mainchain.com:8050 \
+    --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem \
+    --channelID ${CHANNEL_NAME} \
+    --name ${CHAINCODE_NAME} \
+    --version ${CHAINCODE_VERSION} \
+    --package-id ${PACKAGE_ID} \
+    --sequence ${CHAINCODE_SEQUENCE} \
+    --init-required=${CHAINCODE_INIT_REQUIRED}
+  
+  if [ $? -ne 0 ]; then
+    errorln "批准链码定义失败"
+    exit 1
+  fi
+  
+  successln "链码定义已批准"
+}
+
+# 提交链码定义
+function commitChaincode() {
+  infoln "提交链码定义到通道..."
+  
+  # 检查批准状态
+  docker exec cli_mainchain peer lifecycle chaincode checkcommitreadiness \
+    --channelID ${CHANNEL_NAME} \
+    --name ${CHAINCODE_NAME} \
+    --version ${CHAINCODE_VERSION} \
+    --sequence ${CHAINCODE_SEQUENCE} \
+    --init-required=${CHAINCODE_INIT_REQUIRED} \
+    --output json
+  
+  # 检查是否有序列号错误
+  if docker exec cli_mainchain peer lifecycle chaincode checkcommitreadiness \
+    --channelID ${CHANNEL_NAME} \
+    --name ${CHAINCODE_NAME} \
+    --version ${CHAINCODE_VERSION} \
+    --sequence ${CHAINCODE_SEQUENCE} \
+    --init-required=${CHAINCODE_INIT_REQUIRED} \
+    --output json 2>&1 | grep -q "must be sequence"; then
+    
+    warnln "检测到序列号问题"
+    return 1
+  fi
   
   # 提交链码定义
-  print_info "提交链码定义..."
-  docker exec cli_mainchain peer lifecycle chaincode commit -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem --channelID mainchannel --name ${CHAINCODE_NAME} --version ${CHAINCODE_VERSION} --sequence 1 --peerAddresses peer0.org1.mainchain.com:8051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt
+  docker exec cli_mainchain peer lifecycle chaincode commit \
+    -o orderer.mainchain.com:8050 \
+    --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem \
+    --channelID ${CHANNEL_NAME} \
+    --name ${CHAINCODE_NAME} \
+    --version ${CHAINCODE_VERSION} \
+    --sequence ${CHAINCODE_SEQUENCE} \
+    --init-required=${CHAINCODE_INIT_REQUIRED} \
+    --peerAddresses peer0.org1.mainchain.com:8051 \
+    --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt
   
-  # 返回原目录
-  cd "$CURRENT_DIR"
-  
-  print_info "链码已成功部署"
-}
-
-# 升级链码
-upgrade_chaincode() {
-  if [ -z "$1" ]; then
-    print_error "请指定新的链码版本号"
-    exit 1
+  if [ $? -ne 0 ]; then
+    errorln "提交链码定义失败"
+    return 1
   fi
   
-  print_info "开始升级链码..."
-  
-  # 保存当前目录
-  CURRENT_DIR=$(pwd)
-  
-  # 链码名称和路径
-  CHAINCODE_NAME="powercc"
-  CHAINCODE_PATH=$(pwd)
-  CHAINCODE_VERSION="$1"
-  
-  print_info "链码名称: $CHAINCODE_NAME"
-  print_info "链码路径: $CHAINCODE_PATH"
-  print_info "链码新版本: $CHAINCODE_VERSION"
-  
-  # 进入test-network目录
-  cd "$FABRIC_SAMPLES_PATH/test-network" || {
-    print_error "无法进入目录: $FABRIC_SAMPLES_PATH/test-network"
-    exit 1
-  }
-  
-  # 获取当前链码序列号
-  print_info "获取当前链码序列号..."
-  
-  # 设置环境变量
-  export PATH=${PWD}/../bin:$PATH
-  export FABRIC_CFG_PATH=$PWD/../config/
-  export CORE_PEER_TLS_ENABLED=true
-  export CORE_PEER_LOCALMSPID="Org1MSP"
-  export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
-  export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
-  export CORE_PEER_ADDRESS=localhost:7051
-  
-  # 查询当前链码信息
-  CURRENT_SEQUENCE=$(peer lifecycle chaincode querycommitted -C mychannel -n "$CHAINCODE_NAME" 2>/dev/null | grep -o "Sequence: [0-9]*" | cut -d' ' -f2)
-  
-  if [ -z "$CURRENT_SEQUENCE" ]; then
-    print_error "无法获取当前链码序列号，请确保链码已部署"
-    cd "$CURRENT_DIR"
-    exit 1
-  fi
-  
-  # 计算新的序列号
-  NEW_SEQUENCE=$((CURRENT_SEQUENCE + 1))
-  print_info "当前序列号: $CURRENT_SEQUENCE, 新序列号: $NEW_SEQUENCE"
-  
-  # 升级链码
-  print_info "正在升级链码，这可能需要几分钟时间..."
-  ./network.sh deployCC -ccn "$CHAINCODE_NAME" -ccp "$CHAINCODE_PATH" -ccl go -ccv "$CHAINCODE_VERSION" -ccs "$NEW_SEQUENCE" -verbose
-  
-  UPGRADE_RESULT=$?
-  if [ $UPGRADE_RESULT -ne 0 ]; then
-    print_error "升级链码失败，退出码: $UPGRADE_RESULT"
-    cd "$CURRENT_DIR"
-    exit 1
-  fi
-  
-  # 返回原目录
-  cd "$CURRENT_DIR"
-  
-  print_info "链码已成功升级到版本 $CHAINCODE_VERSION, 序列号: $NEW_SEQUENCE"
-}
-
-# 设置环境变量以便与链码交互
-setup_environment() {
-  print_info "设置环境变量..."
-  
-  # 保存当前目录
-  CURRENT_DIR=$(pwd)
-  
-  # 进入docker目录
-  cd "$(dirname "$0")/../mainchain_docker" || {
-    print_error "无法进入目录: $(dirname "$0")/../mainchain_docker"
-    exit 1
-  }
-  
-  # 创建一个与mainchain交互的脚本
-  cat > mainchain_cli.sh << EOF
-#!/bin/bash
-# Mainchain CLI交互脚本
-# 由deploy.sh自动生成
-
-# 颜色定义
-GREEN='\033[0;32m'
-NC='\033[0m' # No Color
-
-# 通道和链码名称
-CHANNEL_NAME="mainchannel"
-CHAINCODE_NAME="mainchaincc"
-
-# 使用说明
-function print_usage() {
-  echo "使用方法: ./mainchain_cli.sh <命令> [参数...]"
-  echo ""
-  echo "命令:"
-  echo "  query <函数名> [参数...]  - 查询链码"
-  echo "  invoke <函数名> [参数...] - 调用链码"
-  echo "  help                     - 显示此帮助信息"
-  echo ""
-  echo "示例:"
-  echo "  ./mainchain_cli.sh query GetUser did:example:123"
-  echo "  ./mainchain_cli.sh invoke RegisterUser did:example:456 李四 110101199001011234 测试公钥"
-}
-
-# 查询链码
-function query_chaincode() {
-  if [ -z "\$1" ]; then
-    echo "错误: 未指定函数名"
-    print_usage
-    exit 1
-  fi
-  
-  FUNC_NAME=\$1
-  shift
-  
-  # 构建参数数组
-  ARGS="["
-  for arg in "\$@"; do
-    ARGS="\${ARGS}\\\""\$arg"\\\","
-  done
-  
-  # 移除最后一个逗号并添加结束括号
-  if [ "\$ARGS" != "[" ]; then
-    ARGS=\${ARGS%,}
-  fi
-  ARGS="\${ARGS}]"
-  
-  echo -e "\${GREEN}查询链码: \${FUNC_NAME}\${NC}"
-  docker exec cli_mainchain peer chaincode query -C \$CHANNEL_NAME -n \$CHAINCODE_NAME -c '{"function":"\$FUNC_NAME","Args":\$ARGS}'
-}
-
-# 调用链码
-function invoke_chaincode() {
-  if [ -z "\$1" ]; then
-    echo "错误: 未指定函数名"
-    print_usage
-    exit 1
-  fi
-  
-  FUNC_NAME=\$1
-  shift
-  
-  # 构建参数数组
-  ARGS="["
-  for arg in "\$@"; do
-    ARGS="\${ARGS}\\\""\$arg"\\\","
-  done
-  
-  # 移除最后一个逗号并添加结束括号
-  if [ "\$ARGS" != "[" ]; then
-    ARGS=\${ARGS%,}
-  fi
-  ARGS="\${ARGS}]"
-  
-  echo -e "\${GREEN}调用链码: \${FUNC_NAME}\${NC}"
-  docker exec cli_mainchain peer chaincode invoke -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem -C \$CHANNEL_NAME -n \$CHAINCODE_NAME --peerAddresses peer0.org1.mainchain.com:8051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt -c '{"function":"\$FUNC_NAME","Args":\$ARGS}' --waitForEvent
-}
-
-# 主函数
-if [ "\$1" == "query" ]; then
-  shift
-  query_chaincode "\$@"
-elif [ "\$1" == "invoke" ]; then
-  shift
-  invoke_chaincode "\$@"
-elif [ "\$1" == "help" ] || [ -z "\$1" ]; then
-  print_usage
-else
-  echo "错误: 未知命令 \$1"
-  print_usage
-  exit 1
-fi
-EOF
-  
-  # 添加执行权限
-  chmod +x mainchain_cli.sh
-  
-  # 返回原目录
-  cd "$CURRENT_DIR"
-  
-  print_info "环境变量已设置，脚本已保存到:"
-  print_info "- $(dirname "$0")/../mainchain_docker/mainchain_cli.sh"
+  successln "链码定义已提交到通道"
+  return 0
 }
 
 # 初始化链码
-init_chaincode() {
-  print_info "初始化链码..."
+function initChaincode() {
+  infoln "初始化链码..."
   
-  # 保存当前目录
-  CURRENT_DIR=$(pwd)
-  
-  # 进入docker目录
-  cd "$(dirname "$0")/../mainchain_docker" || {
-    print_error "无法进入目录: $(dirname "$0")/../mainchain_docker"
-    exit 1
-  }
-  
-  # 获取通道名称和链码名称
-  CHANNEL_NAME="mainchannel"
-  CHAINCODE_NAME="mainchaincc"
-  
-  print_info "调用InitLedger函数..."
-  
-  # 调用InitLedger函数
-  docker exec cli_mainchain peer chaincode invoke -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem -C $CHANNEL_NAME -n $CHAINCODE_NAME --peerAddresses peer0.org1.mainchain.com:8051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt -c '{"function":"InitLedger","Args":[]}' --waitForEvent
-  
-  INIT_RESULT=$?
-  if [ $INIT_RESULT -ne 0 ]; then
-    print_warn "初始化链码返回了非零状态码: $INIT_RESULT"
-    print_warn "如果链码不需要初始化或InitLedger函数不存在，这可能是正常的"
+  if [ "$CHAINCODE_INIT_REQUIRED" = "true" ]; then
+    docker exec cli_mainchain peer chaincode invoke \
+      -o orderer.mainchain.com:8050 \
+      --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem \
+      -C ${CHANNEL_NAME} \
+      -n ${CHAINCODE_NAME} \
+      --isInit \
+      -c '{"function":"InitLedger","Args":[]}' \
+      --peerAddresses peer0.org1.mainchain.com:8051 \
+      --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt \
+      --waitForEvent
+    
+    if [ $? -ne 0 ]; then
+      errorln "初始化链码失败"
+      exit 1
+    fi
   else
-    print_info "链码已成功初始化"
+    infoln "链码不需要初始化"
   fi
   
-  # 等待几秒，确保链码初始化完成
-  sleep 3
+  successln "链码已成功部署"
+}
+
+# 部署链码（包括打包、安装、批准和提交）
+function deployChaincode() {
+  infoln "开始部署链码..."
   
-  # 返回原目录
-  cd "$CURRENT_DIR"
+  packageChaincode
+  installChaincode
+  approveChaincode
+  commitChaincode
+  initChaincode
+  
+  # 生成CLI交互脚本
+  generateCLIScript
+  
+  successln "链码部署完成！"
+}
+
+# 生成CLI交互脚本
+function generateCLIScript() {
+  infoln "生成CLI交互脚本..."
+  
+  # 复制模板脚本到mainchain_docker目录
+  cp ${NETWORK_DIR}/mainchain_cli.sh ${NETWORK_DIR}/mainchain_cli.sh.bak
+  
+  # 更新脚本中的注释
+  sed -i "s/# 由deploy.sh自动生成/# 由deploy.sh自动生成 - $(date)/" ${NETWORK_DIR}/mainchain_cli.sh
+  
+  # 确保脚本有执行权限
+  chmod +x ${NETWORK_DIR}/mainchain_cli.sh
+  
+  successln "CLI交互脚本已更新"
 }
 
 # 测试链码
-test_chaincode() {
-  print_info "测试链码基本功能..."
+function testChaincode() {
+  infoln "测试链码功能..."
   
-  # 保存当前目录
-  CURRENT_DIR=$(pwd)
+  # 检查链码容器状态
+  infoln "检查链码容器状态..."
+  docker ps -a | grep ${CHAINCODE_NAME}
   
-  # 进入docker目录
-  cd "$(dirname "$0")/../mainchain_docker" || {
-    print_error "无法进入目录: $(dirname "$0")/../mainchain_docker"
-    exit 1
-  }
-  
-  # 获取通道名称和链码名称
-  CHANNEL_NAME="mainchannel"
-  CHAINCODE_NAME="mainchaincc"
-  
-  # 注册测试用户
-  print_info "注册测试用户..."
-  docker exec cli_mainchain peer chaincode invoke -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem -C $CHANNEL_NAME -n $CHAINCODE_NAME --peerAddresses peer0.org1.mainchain.com:8051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt -c '{"function":"RegisterUser","Args":["did:example:123", "张三", "110101199001011234", "测试公钥"]}' --waitForEvent
-  
-  REGISTER_RESULT=$?
-  if [ $REGISTER_RESULT -ne 0 ]; then
-    print_error "注册用户失败，退出码: $REGISTER_RESULT"
-    cd "$CURRENT_DIR"
-    return 1
+  # 查看链码日志
+  CHAINCODE_CONTAINER=$(docker ps -a | grep ${CHAINCODE_NAME} | head -n 1 | awk '{print $1}')
+  if [ -n "$CHAINCODE_CONTAINER" ]; then
+    infoln "链码容器ID: $CHAINCODE_CONTAINER"
+    infoln "链码容器日志:"
+    docker logs $CHAINCODE_CONTAINER
+  else
+    warnln "找不到链码容器"
   fi
   
-  # 等待交易确认
+  # 尝试初始化链码
+  infoln "尝试初始化链码..."
+  docker exec cli_mainchain peer chaincode invoke \
+    -o orderer.mainchain.com:8050 \
+    --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem \
+    -C ${CHANNEL_NAME} \
+    -n ${CHAINCODE_NAME} \
+    -c '{"function":"InitLedger","Args":[]}' \
+    --peerAddresses peer0.org1.mainchain.com:8051 \
+    --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt \
+    --waitForEvent
+  
   sleep 3
   
-  # 查询用户信息
-  print_info "查询用户信息..."
-  USER_INFO=$(docker exec cli_mainchain peer chaincode query -C $CHANNEL_NAME -n $CHAINCODE_NAME -c '{"function":"GetUser","Args":["did:example:123"]}')
+  # 测试1：注册新用户
+  infoln "测试1：注册新用户"
+  docker exec cli_mainchain peer chaincode invoke \
+    -o orderer.mainchain.com:8050 \
+    --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem \
+    -C ${CHANNEL_NAME} \
+    -n ${CHAINCODE_NAME} \
+    -c '{"function":"RegisterUser","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}' \
+    --peerAddresses peer0.org1.mainchain.com:8051 \
+    --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt \
+    --waitForEvent
   
-  QUERY_RESULT=$?
-  if [ $QUERY_RESULT -ne 0 ]; then
-    print_error "查询用户信息失败，退出码: $QUERY_RESULT"
-    cd "$CURRENT_DIR"
-    return 1
-  fi
-  
-  print_info "用户信息查询结果:"
-  echo "$USER_INFO" | jq . || echo "$USER_INFO"
-  
-  # 记录攻击行为
-  print_info "记录攻击行为..."
-  docker exec cli_mainchain peer chaincode invoke -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem -C $CHANNEL_NAME -n $CHAINCODE_NAME --peerAddresses peer0.org1.mainchain.com:8051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt -c '{"function":"RecordAttack","Args":["did:example:123", "honeypot001", "SQL注入", "尝试通过SQL注入获取数据库访问权限", "8"]}' --waitForEvent
-  
-  # 等待交易确认
   sleep 3
   
-  # 再次查询用户信息，验证风险评分是否已更新
-  print_info "再次查询用户信息，验证风险评分是否已更新..."
-  UPDATED_USER_INFO=$(docker exec cli_mainchain peer chaincode query -C $CHANNEL_NAME -n $CHAINCODE_NAME -c '{"function":"GetUser","Args":["did:example:123"]}')
+  # 测试2：获取用户DID
+  infoln "测试2：获取用户DID"
+  docker exec cli_mainchain peer chaincode query \
+    -C ${CHANNEL_NAME} \
+    -n ${CHAINCODE_NAME} \
+    -c '{"function":"GetDIDByInfo","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}'
   
-  print_info "更新后的用户信息:"
-  echo "$UPDATED_USER_INFO" | jq . || echo "$UPDATED_USER_INFO"
+  # 保存DID到变量
+  DID=$(docker exec cli_mainchain peer chaincode query \
+    -C ${CHANNEL_NAME} \
+    -n ${CHAINCODE_NAME} \
+    -c '{"function":"GetDIDByInfo","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}' 2>/dev/null)
   
-  # 返回原目录
-  cd "$CURRENT_DIR"
+  sleep 3
   
-  print_info "链码功能测试完成"
+  # 测试3：查询用户信息
+  infoln "测试3：查询用户信息"
+  docker exec cli_mainchain peer chaincode query \
+    -C ${CHANNEL_NAME} \
+    -n ${CHAINCODE_NAME} \
+    -c "{\"function\":\"GetUser\",\"Args\":[\"$DID\"]}"
+  
+  sleep 3
+  
+  # 测试4：用户登录
+  infoln "测试4：用户登录"
+  docker exec cli_mainchain peer chaincode query \
+    -C ${CHANNEL_NAME} \
+    -n ${CHAINCODE_NAME} \
+    -c "{\"function\":\"UserLogin\",\"Args\":[\"$DID\", \"张三\"]}"
+  
+  successln "链码测试完成！"
 }
 
-# 创建帮助文档
-create_help_doc() {
-  print_info "创建帮助文档..."
-  
-  cat > chaincode_commands.md << EOF
-# Mainchain链码命令指南
-
-本文档提供了与Mainchain链码交互的常用命令。
-
-## 使用CLI脚本
-
-我们提供了一个简化的CLI脚本，可以更方便地与链码交互：
-
-\`\`\`bash
-# 查询命令
-../mainchain_docker/mainchain_cli.sh query <函数名> [参数...]
-
-# 调用命令
-../mainchain_docker/mainchain_cli.sh invoke <函数名> [参数...]
-\`\`\`
-
-示例：
-
-\`\`\`bash
-# 查询用户信息
-../mainchain_docker/mainchain_cli.sh query GetUser did:example:123
-
-# 注册新用户
-../mainchain_docker/mainchain_cli.sh invoke RegisterUser did:example:456 李四 110101199001011234 测试公钥
-\`\`\`
-
-## 用户管理命令
-
-### 注册新用户
-
-\`\`\`bash
-../mainchain_docker/mainchain_cli.sh invoke RegisterUser did:example:123 张三 110101199001011234 公钥内容
-\`\`\`
-
-### 获取用户信息
-
-\`\`\`bash
-../mainchain_docker/mainchain_cli.sh query GetUser did:example:123
-\`\`\`
-
-### 验证用户身份
-
-\`\`\`bash
-../mainchain_docker/mainchain_cli.sh query VerifyUser did:example:123
-\`\`\`
-
-### 更改用户状态
-
-\`\`\`bash
-../mainchain_docker/mainchain_cli.sh invoke ChangeUserStatus did:example:123 suspended
-\`\`\`
-
-### 获取所有用户
-
-\`\`\`bash
-../mainchain_docker/mainchain_cli.sh query GetAllUsers
-\`\`\`
-
-## 风险管理命令
-
-### 记录攻击行为
-
-\`\`\`bash
-../mainchain_docker/mainchain_cli.sh invoke RecordAttack did:example:123 honeypot001 SQL注入 尝试通过SQL注入获取数据库访问权限 8
-\`\`\`
-
-### 更新风险评分
-
-\`\`\`bash
-../mainchain_docker/mainchain_cli.sh invoke UpdateRiskScore did:example:123 50
-\`\`\`
-
-### 获取高风险用户
-
-\`\`\`bash
-../mainchain_docker/mainchain_cli.sh query GetHighRiskUsers
-\`\`\`
-
-### 获取特定风险评分范围内的用户
-
-\`\`\`bash
-../mainchain_docker/mainchain_cli.sh query GetUsersByRiskScore 40 70
-\`\`\`
-
-## 关闭网络
-
-当测试完成后，可以使用以下命令关闭网络：
-
-\`\`\`bash
-../mainchain_docker/network.sh down
-\`\`\`
-
-## 原始Docker命令
-
-如果需要使用原始Docker命令，可以参考以下示例：
-
-### 查询命令
-
-\`\`\`bash
-docker exec cli_mainchain peer chaincode query -C mainchannel -n mainchaincc -c '{"function":"GetUser","Args":["did:example:123"]}'
-\`\`\`
-
-### 调用命令
-
-\`\`\`bash
-docker exec cli_mainchain peer chaincode invoke -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem -C mainchannel -n mainchaincc --peerAddresses peer0.org1.mainchain.com:8051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt -c '{"function":"RegisterUser","Args":["did:example:123", "张三", "110101199001011234", "公钥内容..."]}' --waitForEvent
-\`\`\`
-EOF
-  
-  print_info "帮助文档已创建: chaincode_commands.md"
-}
-
-# 显示使用帮助
-show_help() {
-  echo "使用方法: $0 [选项]"
+# 显示帮助信息
+function printHelp() {
+  echo "用法:"
+  echo "  deploy.sh [选项]"
   echo ""
   echo "选项:"
-  echo "  -h, --help      显示此帮助信息"
-  echo "  -c, --clean     清理Docker环境并停止网络"
-  echo "  -n, --network   只启动网络，不部署链码"
-  echo "  -d, --deploy    只部署链码，不启动网络"
-  echo "  -t, --test      只测试链码，不启动网络和部署"
-  echo "  -u, --upgrade   升级链码（指定新版本号）"
+  echo "  -h    显示帮助信息"
+  echo "  -n    启动网络"
+  echo "  -d    部署链码"
+  echo "  -c    清理网络"
+  echo "  -t    测试链码"
   echo ""
   echo "示例:"
-  echo "  $0                # 执行完整部署流程"
-  echo "  $0 --clean        # 清理环境"
-  echo "  $0 --network      # 只启动网络"
-  echo "  $0 --deploy       # 只部署链码"
-  echo "  $0 --upgrade 1.1  # 升级链码到版本1.1"
+  echo "  ./deploy.sh -n -d -t    启动网络、部署链码并测试"
+  echo "  ./deploy.sh -c          清理网络"
+  echo "  ./deploy.sh -n -d       启动网络并部署链码"
 }
+
+# 解析命令行参数
+if [ $# -eq 0 ]; then
+  printHelp
+  exit 0
+fi
+
+while getopts ":hncdt" opt; do
+  case ${opt} in
+    h )
+      printHelp
+      exit 0
+      ;;
+    n )
+      START_NETWORK=true
+      ;;
+    c )
+      CLEAN_NETWORK=true
+      ;;
+    d )
+      DEPLOY_CHAINCODE=true
+      ;;
+    t )
+      TEST_CHAINCODE=true
+      ;;
+    \? )
+      echo "无效选项: -$OPTARG" 1>&2
+      printHelp
+      exit 1
+      ;;
+  esac
+done
 
 # 主函数
-main() {
-  print_info "=== Mainchain链码部署脚本 ==="
-  
-  # 解析命令行参数
-  CLEAN_ONLY=false
-  NETWORK_ONLY=false
-  DEPLOY_ONLY=false
-  TEST_ONLY=false
-  UPGRADE_ONLY=false
-  UPGRADE_VERSION=""
-  
-  while [[ $# -gt 0 ]]; do
-    case $1 in
-      -h|--help)
-        show_help
-        exit 0
-        ;;
-      -c|--clean)
-        CLEAN_ONLY=true
-        shift
-        ;;
-      -n|--network)
-        NETWORK_ONLY=true
-        shift
-        ;;
-      -d|--deploy)
-        DEPLOY_ONLY=true
-        shift
-        ;;
-      -t|--test)
-        TEST_ONLY=true
-        shift
-        ;;
-      -u|--upgrade)
-        UPGRADE_ONLY=true
-        shift
-        if [[ $# -gt 0 ]]; then
-          UPGRADE_VERSION="$1"
-          shift
-        else
-          print_error "升级选项需要指定版本号"
-          show_help
-          exit 1
-        fi
-        ;;
-      *)
-        FABRIC_SAMPLES_PATH="$1"
-        shift
-        ;;
-    esac
-  done
-  
-  # 检查必要组件
-  check_prerequisites
-  
-  # 如果只是清理环境
-  if [ "$CLEAN_ONLY" = true ]; then
-    print_info "只执行清理操作..."
-    cd "$(dirname "$0")/../mainchain_docker" || {
-      print_error "无法进入目录: $(dirname "$0")/../mainchain_docker"
-      exit 1
-    }
-    chmod +x network.sh
-    ./network.sh down
-    clean_docker
-    print_info "清理完成"
-    exit 0
-  fi
-  
-  # 如果只是测试链码
-  if [ "$TEST_ONLY" = true ]; then
-    print_info "只执行测试操作..."
-    setup_environment
-    test_chaincode
-    exit 0
-  fi
-  
-  # 如果只启动网络
-  if [ "$NETWORK_ONLY" = true ]; then
-    print_info "只启动网络..."
-    start_network
-    setup_environment
-    print_info "网络已启动，环境变量已设置"
-    exit 0
-  fi
-  
-  # 如果只部署链码
-  if [ "$DEPLOY_ONLY" = true ]; then
-    print_info "只部署链码..."
-    deploy_chaincode
-    setup_environment
-    init_chaincode
-    print_info "链码已部署并初始化"
-    exit 0
-  fi
-  
-  # 如果只升级链码
-  if [ "$UPGRADE_ONLY" = true ]; then
-    print_info "只升级链码..."
-    upgrade_chaincode "$UPGRADE_VERSION"
-    setup_environment
-    print_info "链码已升级到版本 $UPGRADE_VERSION"
-    exit 0
-  fi
-  
-  # 完整流程
-  print_info "执行完整部署流程..."
-  
-  # 启动网络
-  start_network
-  
-  # 部署链码
-  deploy_chaincode
-  
-  # 设置环境变量
-  setup_environment
-  
-  # 初始化链码
-  init_chaincode
-  
-  # 测试链码
-  test_chaincode
-  
-  # 创建帮助文档
-  create_help_doc
-  
-  print_info "=== 部署完成! ==="
-  print_info "您可以使用 chaincode_commands.md 中的命令与链码交互"
-  print_info "使用前请先运行: source $FABRIC_SAMPLES_PATH/test-network/env.sh"
-}
+checkPrereqs
 
-# 执行主函数
-main "$@"
+# 根据命令行参数执行操作
+if [ "$CLEAN_NETWORK" = true ]; then
+  networkDown
+fi
+
+if [ "$START_NETWORK" = true ]; then
+  networkUp
+fi
+
+if [ "$DEPLOY_CHAINCODE" = true ]; then
+  deployChaincode
+fi
+
+if [ "$TEST_CHAINCODE" = true ]; then
+  testChaincode
+fi
+
+# 如果没有指定任何操作参数，显示帮助
+if [ "$START_NETWORK" = false ] && [ "$DEPLOY_CHAINCODE" = false ] && [ "$CLEAN_NETWORK" = false ] && [ "$TEST_CHAINCODE" = false ]; then
+  printHelp
+  exit 0
+fi

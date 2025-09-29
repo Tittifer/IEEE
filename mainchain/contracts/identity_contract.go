@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
-	"github.com/Tittifer/IEEE/models"
-	"github.com/Tittifer/IEEE/utils"
+	"github.com/Tittifer/IEEE/mainchain/models"
+	"github.com/Tittifer/IEEE/mainchain/utils"
 )
 
 // IdentityContract 身份管理合约

@@ -6,8 +6,8 @@ import (
 	"strconv"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
-	"github.com/Tittifer/IEEE/models"
-	"github.com/Tittifer/IEEE/utils"
+	"github.com/Tittifer/IEEE/mainchain/models"
+	"github.com/Tittifer/IEEE/mainchain/utils"
 )
 
 // RiskContract 风险管理合约

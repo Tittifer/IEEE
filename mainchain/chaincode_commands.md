@@ -1,143 +1,147 @@
-# 电网身份认证链码命令指南
+# 身份认证链码命令指南
 
-本文档提供了与电网身份认证链码交互的常用命令。
+本文档提供了与身份认证链码交互的基本命令指南，包括如何部署、调用和查询链码。
 
-## 环境设置
+## 环境准备
 
-在使用以下命令前，请先设置环境变量：
-
-```bash
-source env.sh
-```
-
-## 链码基本命令
-
-### 初始化账本
+在执行任何命令前，请先确保已经加载了正确的环境变量：
 
 ```bash
-peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C mychannel -n powercc --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"IdentityContract:InitLedger","Args":[]}'
+cd ../mainchain_docker
+source ./env.sh
+cd ../mainchain
 ```
 
-## 用户身份管理命令 (IdentityContract)
+## 链码部署命令
 
-### 注册新用户 (RegisterUser)
+使用deploy.sh脚本部署链码：
 
 ```bash
-peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C mychannel -n powercc --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"IdentityContract:RegisterUser","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}'
+./deploy.sh -n    # 启动网络
+./deploy.sh -d    # 部署链码
 ```
 
-### 获取用户信息 (GetUser)
+## 链码测试命令
+
+### 1. 初始化账本
 
 ```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"IdentityContract:GetUser","Args":["did:example:123456789abcdef0"]}'
+docker exec peer0.org1.mainchain.com peer chaincode invoke \
+  -o localhost:8051 \
+  --tls \
+  --cafile /etc/hyperledger/fabric/msp/tlscacerts/tlsca.mainchain.com-cert.pem \
+  -C mainchannel \
+  -n mainchaincc \
+  --peerAddresses peer0.org1.mainchain.com:8051 \
+  --tlsRootCertFiles /etc/hyperledger/fabric/tls/ca.crt \
+  -c '{"function":"InitLedger","Args":[]}' \
+  --waitForEvent
 ```
 
-### 根据用户信息获取DID (GetDIDByInfo)
+### 2. 注册新用户
 
 ```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"IdentityContract:GetDIDByInfo","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}'
+docker exec cli_mainchain peer chaincode invoke \
+  -o localhost:8050 \
+  --tls \
+  --cafile /etc/hyperledger/fabric/msp/tlscacerts/tlsca.org1.mainchain.com-cert.pem\
+  -C mainchannel \
+  -n mainchaincc \
+  --peerAddresses peer0.org1.mainchain.com:8051 \
+  --tlsRootCertFiles /etc/hyperledger/fabric/tls/ca.crt \
+  -c '{"function":"RegisterUser","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}' \
+  --waitForEvent
 ```
 
-### 验证用户身份 (VerifyIdentity)
+### 3. 获取用户DID
 
 ```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"IdentityContract:VerifyIdentity","Args":["did:example:123456789abcdef0", "张三"]}'
+docker exec cli_mainchain peer chaincode query \
+  -C mainchannel \
+  -n mainchaincc \
+  -c '{"function":"GetDIDByInfo","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}'
 ```
 
-### 用户登录 (UserLogin)
+### 4. 查询用户信息
 
 ```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"IdentityContract:UserLogin","Args":["did:example:123456789abcdef0", "张三"]}'
+# 先获取DID
+DID=$(docker exec cli_mainchain peer chaincode query \
+  -C mainchannel \
+  -n mainchaincc \
+  -c '{"function":"GetDIDByInfo","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}' 2>/dev/null)
+
+# 使用DID查询用户信息
+docker exec cli_mainchain peer chaincode query \
+  -C mainchannel \
+  -n mainchaincc \
+  -c "{\"function\":\"GetUser\",\"Args\":[\"$DID\"]}"
 ```
 
-返回值说明：
-- 如果返回 `"登录成功"` - 登录成功
-- 如果返回 `"登录失败：用户不存在"` - 用户DID不存在
-- 如果返回 `"登录失败：用户名不匹配"` - DID和姓名不匹配
-- 如果返回 `"登录失败：用户状态不活跃"` - 用户状态非活跃
-- 如果返回 `"禁止用户登录"` - 登录失败（风险评分超过阈值）
-
-### 检查用户是否存在 (UserExists)
+### 5. 用户登录
 
 ```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"IdentityContract:UserExists","Args":["did:example:123456789abcdef0"]}'
+# 使用DID和用户名进行登录
+docker exec cli_mainchain peer chaincode query \
+  -C mainchannel \
+  -n mainchaincc \
+  -c "{\"function\":\"UserLogin\",\"Args\":[\"$DID\", \"张三\"]}"
 ```
 
-### 获取所有用户 (GetAllUsers)
+### 6. 验证用户身份
 
 ```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"IdentityContract:GetAllUsers","Args":[]}'
+docker exec cli_mainchain peer chaincode query \
+  -C mainchannel \
+  -n mainchaincc \
+  -c "{\"function\":\"VerifyIdentity\",\"Args\":[\"$DID\", \"张三\"]}"
 ```
 
-## 风险管理命令 (RiskContract)
-
-### 更新用户风险评分 (UpdateRiskScore)
+### 7. 获取所有用户
 
 ```bash
-peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C mychannel -n powercc --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"RiskContract:UpdateRiskScore","Args":["did:example:123456789abcdef0", "60"]}'
+docker exec cli_mainchain peer chaincode query \
+  -C mainchannel \
+  -n mainchaincc \
+  -c '{"function":"GetAllUsers","Args":[]}'
 ```
 
-### 获取用户风险评分 (GetRiskScore)
+## 使用mainchain_cli.sh简化命令
+
+mainchain_docker目录下的mainchain_cli.sh脚本可以简化链码调用：
 
 ```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"RiskContract:GetRiskScore","Args":["did:example:123456789abcdef0"]}'
+cd ../mainchain_docker
+
+# 查询命令
+./mainchain_cli.sh query GetDIDByInfo 张三 110101199001011234 13800138000 京A12345
+
+# 调用命令
+./mainchain_cli.sh invoke RegisterUser 李四 110101199001012345 13900139000 京B12345
 ```
 
-### 检查用户登录资格 (CheckUserLoginEligibility)
+## 常见错误及解决方法
+
+1. **找不到证书文件**：确保证书路径正确，可以使用绝对路径
+2. **链码调用失败**：检查函数名和参数是否正确
+3. **网络连接问题**：确保网络已启动并且容器正在运行
+
+## 调试技巧
+
+查看链码容器日志：
 
 ```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"RiskContract:CheckUserLoginEligibility","Args":["did:example:123456789abcdef0"]}'
+# 获取链码容器ID
+CHAINCODE_CONTAINER=$(docker ps -a | grep mainchaincc | head -n 1 | awk '{print $1}')
+
+# 查看日志
+docker logs $CHAINCODE_CONTAINER
 ```
 
-返回值说明：
-- 如果返回 `"用户可以登录"` - 用户风险评分在允许范围内
-- 如果返回 `"禁止用户登录"` - 用户风险评分超过阈值
-
-### 获取高风险用户 (GetHighRiskUsers)
+查看peer日志：
 
 ```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"RiskContract:GetHighRiskUsers","Args":[]}'
+docker logs peer0.org1.mainchain.com
 ```
 
-### 获取特定风险评分范围内的用户 (GetUsersByRiskScoreRange)
 
-```bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"RiskContract:GetUsersByRiskScoreRange","Args":["40", "70"]}'
-```
-
-## 工具函数相关命令
-
-以下命令展示了如何使用链码中的工具函数：
-
-### 生成DID (GenerateDID)
-
-这是链码内部使用的函数，通过以下参数生成：
-
-```
-did:example:<用户信息的SHA-256哈希前16位>
-```
-
-例如，用户信息 "张三", "110101199001011234", "13800138000", "京A12345" 将生成唯一的DID。
-
-### 验证DID格式 (ValidateDID)
-
-DID格式必须符合 `did:example:<至少16位标识符>` 的格式。
-
-## 测试与部署
-
-### 部署链码
-
-使用项目根目录下的deploy.sh脚本部署链码：
-
-```bash
-./deploy.sh
-```
-
-### 关闭网络
-
-当测试完成后，可以使用以下命令关闭网络：
-
-```bash
-cd $FABRIC_SAMPLES_PATH/test-network
-./network.sh down
-```
