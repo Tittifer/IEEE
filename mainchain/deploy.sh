@@ -2,15 +2,15 @@
 # 忽略未定义变量的错误
 set +u
 
-# 部署脚本 - 一键启动Fabric网络并部署链码
+# 部署脚本 - 一键启动Mainchain网络并部署链码
 # 作者: IEEE链码团队
-# 版本: 1.1
+# 版本: 2.0
 # 
 # 使用方法:
-# ./deploy.sh [fabric-samples路径]
+# ./deploy.sh
 # 
 # 示例:
-# ./deploy.sh /home/yxt/fabric-samples
+# ./deploy.sh
 
 # 颜色定义
 RED='\033[0;31m'
@@ -117,21 +117,22 @@ clean_docker() {
   print_info "Docker环境已清理"
 }
 
-# 启动Fabric测试网络
+# 启动Mainchain网络
 start_network() {
-  print_info "启动Fabric测试网络..."
+  print_info "启动Mainchain网络..."
   
   # 保存当前目录
   CURRENT_DIR=$(pwd)
   
-  # 进入test-network目录
-  cd "$FABRIC_SAMPLES_PATH/test-network" || {
-    print_error "无法进入目录: $FABRIC_SAMPLES_PATH/test-network"
+  # 进入docker目录
+  cd "$(dirname "$0")/../mainchain_docker" || {
+    print_error "无法进入目录: $(dirname "$0")/../mainchain_docker"
     exit 1
   }
   
   # 如果网络已经运行，先关闭
   print_info "关闭可能正在运行的网络..."
+  chmod +x network.sh
   ./network.sh down
   
   # 清理Docker环境，确保没有冲突
@@ -147,20 +148,10 @@ start_network() {
     exit 1
   fi
   
-  # 创建通道
-  print_info "创建通道..."
-  ./network.sh createChannel
-  
-  if [ $? -ne 0 ]; then
-    print_error "创建通道失败"
-    cd "$CURRENT_DIR"
-    exit 1
-  fi
-  
   # 返回原目录
   cd "$CURRENT_DIR"
   
-  print_info "Fabric测试网络已成功启动"
+  print_info "Mainchain网络已成功启动"
 }
 
 # 部署链码
@@ -171,7 +162,7 @@ deploy_chaincode() {
   CURRENT_DIR=$(pwd)
   
   # 链码名称和路径
-  CHAINCODE_NAME="powercc"
+  CHAINCODE_NAME="mainchaincc"
   CHAINCODE_PATH=$(pwd)
   CHAINCODE_VERSION="1.0"
   
@@ -179,22 +170,49 @@ deploy_chaincode() {
   print_info "链码路径: $CHAINCODE_PATH"
   print_info "链码版本: $CHAINCODE_VERSION"
   
-  # 进入test-network目录
-  cd "$FABRIC_SAMPLES_PATH/test-network" || {
-    print_error "无法进入目录: $FABRIC_SAMPLES_PATH/test-network"
+  # 进入docker目录
+  cd "$(dirname "$0")/../mainchain_docker" || {
+    print_error "无法进入目录: $(dirname "$0")/../mainchain_docker"
     exit 1
   }
   
-  # 部署链码
-  print_info "正在部署链码，这可能需要几分钟时间..."
-  ./network.sh deployCC -ccn "$CHAINCODE_NAME" -ccp "$CHAINCODE_PATH" -ccl go -ccv "$CHAINCODE_VERSION" -ccs 1 -verbose
-  
-  DEPLOY_RESULT=$?
-  if [ $DEPLOY_RESULT -ne 0 ]; then
-    print_error "部署链码失败，退出码: $DEPLOY_RESULT"
+  # 确保CLI容器正在运行
+  if ! docker ps | grep -q "cli_mainchain"; then
+    print_error "CLI容器未运行，请确保网络已启动"
     cd "$CURRENT_DIR"
     exit 1
   fi
+  
+  # 部署链码
+  print_info "正在部署链码，这可能需要几分钟时间..."
+  
+  # 打包链码
+  print_info "打包链码..."
+  docker exec cli_mainchain peer lifecycle chaincode package /opt/gopath/src/github.com/hyperledger/fabric/peer/${CHAINCODE_NAME}.tar.gz --path /opt/gopath/src/github.com/Tittifer/IEEE --lang golang --label ${CHAINCODE_NAME}_${CHAINCODE_VERSION}
+  
+  # 安装链码到peer0
+  print_info "安装链码到peer0.org1.mainchain.com..."
+  docker exec cli_mainchain peer lifecycle chaincode install /opt/gopath/src/github.com/hyperledger/fabric/peer/${CHAINCODE_NAME}.tar.gz
+  
+  # 获取链码ID
+  print_info "获取链码ID..."
+  CC_PACKAGE_ID=$(docker exec cli_mainchain peer lifecycle chaincode queryinstalled | grep "${CHAINCODE_NAME}_${CHAINCODE_VERSION}" | awk '{print $3}' | sed 's/,$//')
+  
+  if [ -z "$CC_PACKAGE_ID" ]; then
+    print_error "无法获取链码ID"
+    cd "$CURRENT_DIR"
+    exit 1
+  fi
+  
+  print_info "链码ID: $CC_PACKAGE_ID"
+  
+  # 批准链码
+  print_info "批准链码定义..."
+  docker exec cli_mainchain peer lifecycle chaincode approveformyorg -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem --channelID mainchannel --name ${CHAINCODE_NAME} --version ${CHAINCODE_VERSION} --package-id ${CC_PACKAGE_ID} --sequence 1
+  
+  # 提交链码定义
+  print_info "提交链码定义..."
+  docker exec cli_mainchain peer lifecycle chaincode commit -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem --channelID mainchannel --name ${CHAINCODE_NAME} --version ${CHAINCODE_VERSION} --sequence 1 --peerAddresses peer0.org1.mainchain.com:8051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt
   
   # 返回原目录
   cd "$CURRENT_DIR"
@@ -278,64 +296,118 @@ setup_environment() {
   # 保存当前目录
   CURRENT_DIR=$(pwd)
   
-  # 进入test-network目录
-  cd "$FABRIC_SAMPLES_PATH/test-network" || {
-    print_error "无法进入目录: $FABRIC_SAMPLES_PATH/test-network"
+  # 进入docker目录
+  cd "$(dirname "$0")/../mainchain_docker" || {
+    print_error "无法进入目录: $(dirname "$0")/../mainchain_docker"
     exit 1
   }
   
-  # 设置环境变量
-  export PATH=${PWD}/../bin:$PATH
-  export FABRIC_CFG_PATH=$PWD/../config/
-  export CORE_PEER_TLS_ENABLED=true
-  export CORE_PEER_LOCALMSPID="Org1MSP"
-  export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
-  export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
-  export CORE_PEER_ADDRESS=localhost:7051
-  
-  # 保存环境变量到文件，方便后续使用
-  cat > env.sh << EOF
+  # 创建一个与mainchain交互的脚本
+  cat > mainchain_cli.sh << EOF
 #!/bin/bash
-# Fabric环境变量设置脚本
+# Mainchain CLI交互脚本
 # 由deploy.sh自动生成
 
-export PATH=${PWD}/../bin:\$PATH
-export FABRIC_CFG_PATH=$PWD/../config/
-export CORE_PEER_TLS_ENABLED=true
-export CORE_PEER_LOCALMSPID="Org1MSP"
-export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
-export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
-export CORE_PEER_ADDRESS=localhost:7051
+# 颜色定义
+GREEN='\033[0;32m'
+NC='\033[0m' # No Color
 
-echo "Fabric环境变量已设置"
+# 通道和链码名称
+CHANNEL_NAME="mainchannel"
+CHAINCODE_NAME="mainchaincc"
+
+# 使用说明
+function print_usage() {
+  echo "使用方法: ./mainchain_cli.sh <命令> [参数...]"
+  echo ""
+  echo "命令:"
+  echo "  query <函数名> [参数...]  - 查询链码"
+  echo "  invoke <函数名> [参数...] - 调用链码"
+  echo "  help                     - 显示此帮助信息"
+  echo ""
+  echo "示例:"
+  echo "  ./mainchain_cli.sh query GetUser did:example:123"
+  echo "  ./mainchain_cli.sh invoke RegisterUser did:example:456 李四 110101199001011234 测试公钥"
+}
+
+# 查询链码
+function query_chaincode() {
+  if [ -z "\$1" ]; then
+    echo "错误: 未指定函数名"
+    print_usage
+    exit 1
+  fi
+  
+  FUNC_NAME=\$1
+  shift
+  
+  # 构建参数数组
+  ARGS="["
+  for arg in "\$@"; do
+    ARGS="\${ARGS}\\\""\$arg"\\\","
+  done
+  
+  # 移除最后一个逗号并添加结束括号
+  if [ "\$ARGS" != "[" ]; then
+    ARGS=\${ARGS%,}
+  fi
+  ARGS="\${ARGS}]"
+  
+  echo -e "\${GREEN}查询链码: \${FUNC_NAME}\${NC}"
+  docker exec cli_mainchain peer chaincode query -C \$CHANNEL_NAME -n \$CHAINCODE_NAME -c '{"function":"\$FUNC_NAME","Args":\$ARGS}'
+}
+
+# 调用链码
+function invoke_chaincode() {
+  if [ -z "\$1" ]; then
+    echo "错误: 未指定函数名"
+    print_usage
+    exit 1
+  fi
+  
+  FUNC_NAME=\$1
+  shift
+  
+  # 构建参数数组
+  ARGS="["
+  for arg in "\$@"; do
+    ARGS="\${ARGS}\\\""\$arg"\\\","
+  done
+  
+  # 移除最后一个逗号并添加结束括号
+  if [ "\$ARGS" != "[" ]; then
+    ARGS=\${ARGS%,}
+  fi
+  ARGS="\${ARGS}]"
+  
+  echo -e "\${GREEN}调用链码: \${FUNC_NAME}\${NC}"
+  docker exec cli_mainchain peer chaincode invoke -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem -C \$CHANNEL_NAME -n \$CHAINCODE_NAME --peerAddresses peer0.org1.mainchain.com:8051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt -c '{"function":"\$FUNC_NAME","Args":\$ARGS}' --waitForEvent
+}
+
+# 主函数
+if [ "\$1" == "query" ]; then
+  shift
+  query_chaincode "\$@"
+elif [ "\$1" == "invoke" ]; then
+  shift
+  invoke_chaincode "\$@"
+elif [ "\$1" == "help" ] || [ -z "\$1" ]; then
+  print_usage
+else
+  echo "错误: 未知命令 \$1"
+  print_usage
+  exit 1
+fi
 EOF
   
   # 添加执行权限
-  chmod +x env.sh
-  
-  # 创建一个切换到Org2的脚本
-  cat > switch_to_org2.sh << EOF
-#!/bin/bash
-# 切换到Org2的环境变量设置脚本
-# 由deploy.sh自动生成
-
-export CORE_PEER_LOCALMSPID="Org2MSP"
-export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
-export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp
-export CORE_PEER_ADDRESS=localhost:9051
-
-echo "已切换到Org2"
-EOF
-  
-  # 添加执行权限
-  chmod +x switch_to_org2.sh
+  chmod +x mainchain_cli.sh
   
   # 返回原目录
   cd "$CURRENT_DIR"
   
   print_info "环境变量已设置，脚本已保存到:"
-  print_info "- $FABRIC_SAMPLES_PATH/test-network/env.sh"
-  print_info "- $FABRIC_SAMPLES_PATH/test-network/switch_to_org2.sh"
+  print_info "- $(dirname "$0")/../mainchain_docker/mainchain_cli.sh"
 }
 
 # 初始化链码
@@ -345,23 +417,20 @@ init_chaincode() {
   # 保存当前目录
   CURRENT_DIR=$(pwd)
   
-  # 进入test-network目录
-  cd "$FABRIC_SAMPLES_PATH/test-network" || {
-    print_error "无法进入目录: $FABRIC_SAMPLES_PATH/test-network"
+  # 进入docker目录
+  cd "$(dirname "$0")/../mainchain_docker" || {
+    print_error "无法进入目录: $(dirname "$0")/../mainchain_docker"
     exit 1
   }
   
   # 获取通道名称和链码名称
-  CHANNEL_NAME="mychannel"
-  CHAINCODE_NAME="powercc"
-  
-  # 确保环境变量已设置
-  source ./env.sh > /dev/null 2>&1
+  CHANNEL_NAME="mainchannel"
+  CHAINCODE_NAME="mainchaincc"
   
   print_info "调用InitLedger函数..."
   
   # 调用InitLedger函数
-  peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C $CHANNEL_NAME -n $CHAINCODE_NAME --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"InitLedger","Args":[]}' --waitForEvent
+  docker exec cli_mainchain peer chaincode invoke -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem -C $CHANNEL_NAME -n $CHAINCODE_NAME --peerAddresses peer0.org1.mainchain.com:8051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt -c '{"function":"InitLedger","Args":[]}' --waitForEvent
   
   INIT_RESULT=$?
   if [ $INIT_RESULT -ne 0 ]; then
@@ -385,22 +454,19 @@ test_chaincode() {
   # 保存当前目录
   CURRENT_DIR=$(pwd)
   
-  # 进入test-network目录
-  cd "$FABRIC_SAMPLES_PATH/test-network" || {
-    print_error "无法进入目录: $FABRIC_SAMPLES_PATH/test-network"
+  # 进入docker目录
+  cd "$(dirname "$0")/../mainchain_docker" || {
+    print_error "无法进入目录: $(dirname "$0")/../mainchain_docker"
     exit 1
   }
   
   # 获取通道名称和链码名称
-  CHANNEL_NAME="mychannel"
-  CHAINCODE_NAME="powercc"
-  
-  # 确保环境变量已设置
-  source ./env.sh > /dev/null 2>&1
+  CHANNEL_NAME="mainchannel"
+  CHAINCODE_NAME="mainchaincc"
   
   # 注册测试用户
   print_info "注册测试用户..."
-  peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C $CHANNEL_NAME -n $CHAINCODE_NAME --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"RegisterUser","Args":["did:example:123", "张三", "110101199001011234", "测试公钥"]}' --waitForEvent
+  docker exec cli_mainchain peer chaincode invoke -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem -C $CHANNEL_NAME -n $CHAINCODE_NAME --peerAddresses peer0.org1.mainchain.com:8051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt -c '{"function":"RegisterUser","Args":["did:example:123", "张三", "110101199001011234", "测试公钥"]}' --waitForEvent
   
   REGISTER_RESULT=$?
   if [ $REGISTER_RESULT -ne 0 ]; then
@@ -414,7 +480,7 @@ test_chaincode() {
   
   # 查询用户信息
   print_info "查询用户信息..."
-  USER_INFO=$(peer chaincode query -C $CHANNEL_NAME -n $CHAINCODE_NAME -c '{"function":"GetUser","Args":["did:example:123"]}')
+  USER_INFO=$(docker exec cli_mainchain peer chaincode query -C $CHANNEL_NAME -n $CHAINCODE_NAME -c '{"function":"GetUser","Args":["did:example:123"]}')
   
   QUERY_RESULT=$?
   if [ $QUERY_RESULT -ne 0 ]; then
@@ -428,14 +494,14 @@ test_chaincode() {
   
   # 记录攻击行为
   print_info "记录攻击行为..."
-  peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C $CHANNEL_NAME -n $CHAINCODE_NAME --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"RecordAttack","Args":["did:example:123", "honeypot001", "SQL注入", "尝试通过SQL注入获取数据库访问权限", "8"]}' --waitForEvent
+  docker exec cli_mainchain peer chaincode invoke -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem -C $CHANNEL_NAME -n $CHAINCODE_NAME --peerAddresses peer0.org1.mainchain.com:8051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt -c '{"function":"RecordAttack","Args":["did:example:123", "honeypot001", "SQL注入", "尝试通过SQL注入获取数据库访问权限", "8"]}' --waitForEvent
   
   # 等待交易确认
   sleep 3
   
   # 再次查询用户信息，验证风险评分是否已更新
   print_info "再次查询用户信息，验证风险评分是否已更新..."
-  UPDATED_USER_INFO=$(peer chaincode query -C $CHANNEL_NAME -n $CHAINCODE_NAME -c '{"function":"GetUser","Args":["did:example:123"]}')
+  UPDATED_USER_INFO=$(docker exec cli_mainchain peer chaincode query -C $CHANNEL_NAME -n $CHAINCODE_NAME -c '{"function":"GetUser","Args":["did:example:123"]}')
   
   print_info "更新后的用户信息:"
   echo "$UPDATED_USER_INFO" | jq . || echo "$UPDATED_USER_INFO"
@@ -451,16 +517,30 @@ create_help_doc() {
   print_info "创建帮助文档..."
   
   cat > chaincode_commands.md << EOF
-# 电网身份认证链码命令指南
+# Mainchain链码命令指南
 
-本文档提供了与电网身份认证链码交互的常用命令。
+本文档提供了与Mainchain链码交互的常用命令。
 
-## 环境设置
+## 使用CLI脚本
 
-在使用以下命令前，请先设置环境变量：
+我们提供了一个简化的CLI脚本，可以更方便地与链码交互：
 
 \`\`\`bash
-source env.sh
+# 查询命令
+../mainchain_docker/mainchain_cli.sh query <函数名> [参数...]
+
+# 调用命令
+../mainchain_docker/mainchain_cli.sh invoke <函数名> [参数...]
+\`\`\`
+
+示例：
+
+\`\`\`bash
+# 查询用户信息
+../mainchain_docker/mainchain_cli.sh query GetUser did:example:123
+
+# 注册新用户
+../mainchain_docker/mainchain_cli.sh invoke RegisterUser did:example:456 李四 110101199001011234 测试公钥
 \`\`\`
 
 ## 用户管理命令
@@ -468,31 +548,31 @@ source env.sh
 ### 注册新用户
 
 \`\`\`bash
-peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile \${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C mychannel -n powercc --peerAddresses localhost:7051 --tlsRootCertFiles \${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles \${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"RegisterUser","Args":["did:example:123", "张三", "110101199001011234", "公钥内容..."]}'
+../mainchain_docker/mainchain_cli.sh invoke RegisterUser did:example:123 张三 110101199001011234 公钥内容
 \`\`\`
 
 ### 获取用户信息
 
 \`\`\`bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"GetUser","Args":["did:example:123"]}'
+../mainchain_docker/mainchain_cli.sh query GetUser did:example:123
 \`\`\`
 
 ### 验证用户身份
 
 \`\`\`bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"VerifyUser","Args":["did:example:123"]}'
+../mainchain_docker/mainchain_cli.sh query VerifyUser did:example:123
 \`\`\`
 
 ### 更改用户状态
 
 \`\`\`bash
-peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile \${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C mychannel -n powercc --peerAddresses localhost:7051 --tlsRootCertFiles \${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles \${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"ChangeUserStatus","Args":["did:example:123", "suspended"]}'
+../mainchain_docker/mainchain_cli.sh invoke ChangeUserStatus did:example:123 suspended
 \`\`\`
 
 ### 获取所有用户
 
 \`\`\`bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"GetAllUsers","Args":[]}'
+../mainchain_docker/mainchain_cli.sh query GetAllUsers
 \`\`\`
 
 ## 风险管理命令
@@ -500,25 +580,25 @@ peer chaincode query -C mychannel -n powercc -c '{"function":"GetAllUsers","Args
 ### 记录攻击行为
 
 \`\`\`bash
-peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile \${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C mychannel -n powercc --peerAddresses localhost:7051 --tlsRootCertFiles \${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles \${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"RecordAttack","Args":["did:example:123", "honeypot001", "SQL注入", "尝试通过SQL注入获取数据库访问权限", "8"]}'
+../mainchain_docker/mainchain_cli.sh invoke RecordAttack did:example:123 honeypot001 SQL注入 尝试通过SQL注入获取数据库访问权限 8
 \`\`\`
 
 ### 更新风险评分
 
 \`\`\`bash
-peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile \${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C mychannel -n powercc --peerAddresses localhost:7051 --tlsRootCertFiles \${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses localhost:9051 --tlsRootCertFiles \${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"function":"UpdateRiskScore","Args":["did:example:123", "50"]}'
+../mainchain_docker/mainchain_cli.sh invoke UpdateRiskScore did:example:123 50
 \`\`\`
 
 ### 获取高风险用户
 
 \`\`\`bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"GetHighRiskUsers","Args":[]}'
+../mainchain_docker/mainchain_cli.sh query GetHighRiskUsers
 \`\`\`
 
 ### 获取特定风险评分范围内的用户
 
 \`\`\`bash
-peer chaincode query -C mychannel -n powercc -c '{"function":"GetUsersByRiskScore","Args":["40", "70"]}'
+../mainchain_docker/mainchain_cli.sh query GetUsersByRiskScore 40 70
 \`\`\`
 
 ## 关闭网络
@@ -526,8 +606,23 @@ peer chaincode query -C mychannel -n powercc -c '{"function":"GetUsersByRiskScor
 当测试完成后，可以使用以下命令关闭网络：
 
 \`\`\`bash
-cd \$FABRIC_SAMPLES_PATH/test-network
-./network.sh down
+../mainchain_docker/network.sh down
+\`\`\`
+
+## 原始Docker命令
+
+如果需要使用原始Docker命令，可以参考以下示例：
+
+### 查询命令
+
+\`\`\`bash
+docker exec cli_mainchain peer chaincode query -C mainchannel -n mainchaincc -c '{"function":"GetUser","Args":["did:example:123"]}'
+\`\`\`
+
+### 调用命令
+
+\`\`\`bash
+docker exec cli_mainchain peer chaincode invoke -o orderer.mainchain.com:8050 --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem -C mainchannel -n mainchaincc --peerAddresses peer0.org1.mainchain.com:8051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt -c '{"function":"RegisterUser","Args":["did:example:123", "张三", "110101199001011234", "公钥内容..."]}' --waitForEvent
 \`\`\`
 EOF
   
@@ -536,7 +631,7 @@ EOF
 
 # 显示使用帮助
 show_help() {
-  echo "使用方法: $0 [选项] [fabric-samples路径]"
+  echo "使用方法: $0 [选项]"
   echo ""
   echo "选项:"
   echo "  -h, --help      显示此帮助信息"
@@ -547,17 +642,16 @@ show_help() {
   echo "  -u, --upgrade   升级链码（指定新版本号）"
   echo ""
   echo "示例:"
-  echo "  $0                         # 执行完整部署流程"
-  echo "  $0 /path/to/fabric-samples  # 使用指定的fabric-samples路径"
-  echo "  $0 --clean                 # 清理环境"
-  echo "  $0 --network               # 只启动网络"
-  echo "  $0 --deploy                # 只部署链码"
-  echo "  $0 --upgrade 1.1           # 升级链码到版本1.1"
+  echo "  $0                # 执行完整部署流程"
+  echo "  $0 --clean        # 清理环境"
+  echo "  $0 --network      # 只启动网络"
+  echo "  $0 --deploy       # 只部署链码"
+  echo "  $0 --upgrade 1.1  # 升级链码到版本1.1"
 }
 
 # 主函数
 main() {
-  print_info "=== 电网身份认证链码部署脚本 ==="
+  print_info "=== Mainchain链码部署脚本 ==="
   
   # 解析命令行参数
   CLEAN_ONLY=false
@@ -609,15 +703,16 @@ main() {
   done
   
   # 检查必要组件
-  check_prerequisites "$FABRIC_SAMPLES_PATH"
+  check_prerequisites
   
   # 如果只是清理环境
   if [ "$CLEAN_ONLY" = true ]; then
     print_info "只执行清理操作..."
-    cd "$FABRIC_SAMPLES_PATH/test-network" || {
-      print_error "无法进入目录: $FABRIC_SAMPLES_PATH/test-network"
+    cd "$(dirname "$0")/../mainchain_docker" || {
+      print_error "无法进入目录: $(dirname "$0")/../mainchain_docker"
       exit 1
     }
+    chmod +x network.sh
     ./network.sh down
     clean_docker
     print_info "清理完成"
