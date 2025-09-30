@@ -10,7 +10,6 @@ import (
 	"github.com/Tittifer/IEEE/transmit/config"
 	"github.com/Tittifer/IEEE/transmit/connection"
 	"github.com/Tittifer/IEEE/transmit/handlers"
-	"github.com/Tittifer/IEEE/transmit/models"
 )
 
 func main() {
