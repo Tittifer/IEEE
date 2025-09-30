@@ -21,8 +21,9 @@ mainchain/
 
 - **用户身份管理**：注册、验证和管理用户身份
 - **风险评分系统**：基于用户行为动态调整风险评分
-- **用户状态管理**：管理用户的活跃状态
+- **用户状态管理**：管理用户的活跃状态、在线/离线状态
 - **DID生成与验证**：生成和验证分布式身份标识符
+- **链间数据同步**：与侧链进行数据同步，包括风险评分和用户状态
 
 ## 数据结构
 
@@ -33,7 +34,7 @@ type UserInfo struct {
     DID           string `json:"did"`           // 用户的分布式身份标识符
     Name          string `json:"name"`          // 用户姓名
     RiskScore     int    `json:"riskScore"`     // 用户风险评分 (0-100)
-    Status        string `json:"status"`        // 用户状态: active
+    Status        string `json:"status"`        // 用户状态: active/inactive/risky/online/offline
     CreatedAt     string `json:"createdAt"`     // 创建时间
     LastUpdatedAt string `json:"lastUpdatedAt"` // 最后更新时间
 }
@@ -52,6 +53,8 @@ type UserInfo struct {
 - **GetDIDByInfo**: 根据用户信息生成DID
 - **VerifyIdentity**: 验证用户身份
 - **UserLogin**: 用户登录
+- **UserLogout**: 用户登出
+- **UpdateRiskScore**: 更新用户风险评分
 - **GetAllUsers**: 获取所有用户
 
 ### RiskContract
@@ -68,6 +71,15 @@ type UserInfo struct {
 ## 风险评分
 
 风险评分范围从0到100，风险评分阈值为50，超过此值将禁止用户登录。
+
+## 用户状态
+
+用户状态包括以下几种：
+- **active**: 用户活跃状态
+- **inactive**: 用户非活跃状态
+- **risky**: 用户风险状态（风险评分超过阈值）
+- **online**: 用户在线状态
+- **offline**: 用户离线状态
 
 ## 使用示例
 
@@ -86,20 +98,33 @@ peer chaincode query -C mainchannel -n powercc -c '{"function":"VerifyIdentity",
 ### 3. 用户登录
 
 ```
-peer chaincode query -C mainchannel -n powercc -c '{"function":"UserLogin","Args":["did:example:1234567890abcdef", "张三"]}'
+peer chaincode invoke -C mainchannel -n powercc -c '{"function":"UserLogin","Args":["did:example:1234567890abcdef", "张三"]}'
 ```
 
-### 4. 获取高风险用户
+### 4. 用户登出
+
+```
+peer chaincode invoke -C mainchannel -n powercc -c '{"function":"UserLogout","Args":["did:example:1234567890abcdef"]}'
+```
+
+### 5. 获取高风险用户
 
 ```
 peer chaincode query -C mainchannel -n powercc -c '{"function":"GetHighRiskUsers","Args":[]}'
 ```
 
-### 5. 更新用户风险评分
+### 6. 更新用户风险评分
 
 ```
 peer chaincode invoke -C mainchannel -n powercc -c '{"function":"UpdateRiskScore","Args":["did:example:1234567890abcdef", "30"]}'
 ```
+
+## 链间通信
+
+主链与侧链之间通过transmit模块进行数据同步，实现以下功能：
+- 用户登录时，同步更新侧链用户状态为登录状态
+- 用户登出时，同步更新侧链用户状态为登出状态
+- 侧链风险评分变化时，同步更新主链用户的风险评分
 
 ## 部署说明
 

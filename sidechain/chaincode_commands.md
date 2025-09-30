@@ -137,13 +137,23 @@ docker exec cli_sidechain peer chaincode query \
 ## 风险评估工作流程
 
 1. **创建DID记录**：首先创建用户的DID记录
-2. **用户登录**：更新用户状态为"online"
+2. **用户登录**：
+   - 用户在主链登录后，transmit服务自动在侧链更新用户状态为"online"
+   - 系统重置用户的严重程度值`SeverityLevel`为0
+   - 系统重置用户的风险触发标记`HasTriggeredRisk`为false
 3. **报告风险行为**：当用户触发风险行为时，调用`RiskContract:ReportRiskBehavior`函数
    - 系统会自动记录风险行为并增加严重程度
    - 系统会自动计算并更新风险评分
    - 在用户当前会话中首次触发风险行为时，系统会更新时间戳
    - 时间间隔是本次登录首次触发风险行为和上次登录首次触发风险行为的时间差
-4. **用户登出**：更新用户状态为"offline"，系统会重置严重程度和风险触发标记
+   - 系统设置用户的风险触发标记`HasTriggeredRisk`为true
+4. **风险评分同步**：
+   - transmit服务自动将侧链的风险评分同步到主链
+   - 如果风险评分超过阈值，主链用户状态会被更新为"risky"
+5. **用户登出**：
+   - 用户在主链登出后，transmit服务自动在侧链更新用户状态为"offline"
+   - 系统重置用户的严重程度值`SeverityLevel`为0
+   - 系统重置用户的风险触发标记`HasTriggeredRisk`为false
 
 ## 常见错误及解决方法
 

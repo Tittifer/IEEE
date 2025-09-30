@@ -3,6 +3,7 @@ package contracts
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
@@ -186,8 +187,143 @@ func (c *IdentityContract) UserLogin(ctx contractapi.TransactionContextInterface
 		return "禁止用户登录", nil
 	}
 	
+	// 更新用户状态为在线
+	userInfo.Status = models.StatusOnline
+	
+	// 使用交易时间戳更新最后更新时间
+	timestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return "", fmt.Errorf("获取交易时间戳失败: %v", err)
+	}
+	txTime := time.Unix(timestamp.Seconds, int64(timestamp.Nanos))
+	userInfo.LastUpdatedAt = txTime.Format(time.RFC3339)
+	
+	// 将更新后的用户信息保存到账本
+	userInfoJSON, err = json.Marshal(userInfo)
+	if err != nil {
+		return "", fmt.Errorf("用户信息序列化失败: %v", err)
+	}
+	
+	err = ctx.GetStub().PutState(did, userInfoJSON)
+	if err != nil {
+		return "", fmt.Errorf("更新用户信息时出错: %v", err)
+	}
+	
 	// 登录成功
 	return "登录成功", nil
+}
+
+// UserLogout 用户登出
+func (c *IdentityContract) UserLogout(ctx contractapi.TransactionContextInterface, did string) (string, error) {
+	// 验证DID格式
+	if !utils.ValidateDID(did) {
+		return "", fmt.Errorf("无效的DID格式: %s", did)
+	}
+	
+	// 获取用户信息
+	userInfoJSON, err := ctx.GetStub().GetState(did)
+	if err != nil {
+		return "", fmt.Errorf("读取用户信息时出错: %v", err)
+	}
+	if userInfoJSON == nil {
+		return "", fmt.Errorf("用户DID %s 不存在", did)
+	}
+	
+	// 反序列化用户信息
+	var userInfo models.UserInfo
+	err = json.Unmarshal(userInfoJSON, &userInfo)
+	if err != nil {
+		return "", fmt.Errorf("用户信息反序列化失败: %v", err)
+	}
+	
+	// 检查用户是否已经登出
+	if userInfo.Status != models.StatusOnline {
+		return "用户未登录，无需登出", nil
+	}
+	
+	// 更新用户状态为离线
+	userInfo.Status = models.StatusOffline
+	
+	// 使用交易时间戳更新最后更新时间
+	timestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return "", fmt.Errorf("获取交易时间戳失败: %v", err)
+	}
+	txTime := time.Unix(timestamp.Seconds, int64(timestamp.Nanos))
+	userInfo.LastUpdatedAt = txTime.Format(time.RFC3339)
+	
+	// 将更新后的用户信息保存到账本
+	userInfoJSON, err = json.Marshal(userInfo)
+	if err != nil {
+		return "", fmt.Errorf("用户信息序列化失败: %v", err)
+	}
+	
+	err = ctx.GetStub().PutState(did, userInfoJSON)
+	if err != nil {
+		return "", fmt.Errorf("更新用户信息时出错: %v", err)
+	}
+	
+	// 登出成功
+	return "登出成功", nil
+}
+
+// UpdateRiskScore 更新用户风险评分
+func (c *IdentityContract) UpdateRiskScore(ctx contractapi.TransactionContextInterface, did string, riskScoreStr string) error {
+	// 验证DID格式
+	if !utils.ValidateDID(did) {
+		return fmt.Errorf("无效的DID格式: %s", did)
+	}
+	
+	// 解析风险评分
+	riskScore, err := strconv.Atoi(riskScoreStr)
+	if err != nil {
+		return fmt.Errorf("无效的风险评分格式: %s", riskScoreStr)
+	}
+	
+	// 获取用户信息
+	userInfoJSON, err := ctx.GetStub().GetState(did)
+	if err != nil {
+		return fmt.Errorf("读取用户信息时出错: %v", err)
+	}
+	if userInfoJSON == nil {
+		return fmt.Errorf("用户DID %s 不存在", did)
+	}
+	
+	// 反序列化用户信息
+	var userInfo models.UserInfo
+	err = json.Unmarshal(userInfoJSON, &userInfo)
+	if err != nil {
+		return fmt.Errorf("用户信息反序列化失败: %v", err)
+	}
+	
+	// 更新风险评分
+	userInfo.RiskScore = riskScore
+	
+	// 如果风险评分超过阈值，更新用户状态为风险状态
+	if riskScore > models.RiskScoreThreshold && userInfo.Status != models.StatusRisky {
+		userInfo.Status = models.StatusRisky
+	}
+	
+	// 使用交易时间戳更新最后更新时间
+	timestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return fmt.Errorf("获取交易时间戳失败: %v", err)
+	}
+	txTime := time.Unix(timestamp.Seconds, int64(timestamp.Nanos))
+	userInfo.LastUpdatedAt = txTime.Format(time.RFC3339)
+	
+	// 将更新后的用户信息保存到账本
+	userInfoJSON, err = json.Marshal(userInfo)
+	if err != nil {
+		return fmt.Errorf("用户信息序列化失败: %v", err)
+	}
+	
+	err = ctx.GetStub().PutState(did, userInfoJSON)
+	if err != nil {
+		return fmt.Errorf("更新用户信息时出错: %v", err)
+	}
+	
+	return nil
 }
 
 // GetAllUsers 获取所有用户

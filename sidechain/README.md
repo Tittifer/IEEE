@@ -28,6 +28,7 @@ sidechain/
 - **用户会话管理**：跟踪用户登录状态和风险行为
 - **风险行为识别**：识别和记录不同类型的风险行为
 - **风险评分衰减**：基于时间的风险评分自动衰减机制
+- **链间数据同步**：与主链进行数据同步，包括用户登录/登出状态
 
 ## 数据结构
 
@@ -112,8 +113,29 @@ DID管理合约，处理DID记录的创建和查询。
    其中：
    - S_{t-1}：上次计算得分
    - δ：影响低分时降温速度参数
-   - Δt：时间间隔
+   - Δt：时间间隔（当前登录首次触发风险行为与上次登录首次触发风险行为的时间差）
    - α：影响高分时降温速度参数
+
+## 用户会话和风险行为流程
+
+1. **用户登录**：
+   - 主链用户登录后，通过transmit服务同步到侧链
+   - 侧链调用`SessionContract:UpdateUserStatus`更新用户状态为"online"
+   - 重置用户的严重程度值`SeverityLevel`为0
+   - 重置用户的风险触发标记`HasTriggeredRisk`为false
+
+2. **风险行为报告**：
+   - 当用户触发风险行为时，调用`RiskContract:ReportRiskBehavior`
+   - 系统增加用户的严重程度值`SeverityLevel`
+   - 设置用户的风险触发标记`HasTriggeredRisk`为true
+   - 如果是当前会话中首次触发风险行为，更新时间戳`Timestamp`
+   - 计算风险评分并更新到账本
+
+3. **用户登出**：
+   - 主链用户登出后，通过transmit服务同步到侧链
+   - 侧链调用`SessionContract:UpdateUserStatus`更新用户状态为"offline"
+   - 重置用户的严重程度值`SeverityLevel`为0
+   - 重置用户的风险触发标记`HasTriggeredRisk`为false
 
 ## 使用示例
 
@@ -185,6 +207,13 @@ docker exec cli_sidechain peer chaincode invoke \
   -c '{"function":"SessionContract:UpdateUserStatus","Args":["did:example:1234567890abcdef", "offline"]}' \
   --waitForEvent
 ```
+
+## 链间通信
+
+侧链与主链之间通过transmit模块进行数据同步，实现以下功能：
+- 主链用户登录时，同步更新侧链用户状态为登录状态
+- 主链用户登出时，同步更新侧链用户状态为登出状态
+- 侧链风险评分变化时，同步更新主链用户的风险评分
 
 ## 部署说明
 

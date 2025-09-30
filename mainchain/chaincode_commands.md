@@ -82,13 +82,35 @@ docker exec cli_mainchain peer chaincode query \
 
 ```bash
 # 使用DID和用户名进行登录
-docker exec cli_mainchain peer chaincode query \
+docker exec cli_mainchain peer chaincode invoke \
+  -o orderer.mainchain.com:8050 \
+  --tls \
+  --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem \
   -C mainchannel \
   -n mainchaincc \
-  -c "{\"function\":\"UserLogin\",\"Args\":[\"$DID\", \"张三\"]}"
+  --peerAddresses peer0.org1.mainchain.com:8051 \
+  --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt \
+  -c "{\"function\":\"UserLogin\",\"Args\":[\"$DID\", \"张三\"]}" \
+  --waitForEvent
 ```
 
-### 6. 验证用户身份
+### 6. 用户登出
+
+```bash
+# 使用DID进行登出
+docker exec cli_mainchain peer chaincode invoke \
+  -o orderer.mainchain.com:8050 \
+  --tls \
+  --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem \
+  -C mainchannel \
+  -n mainchaincc \
+  --peerAddresses peer0.org1.mainchain.com:8051 \
+  --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt \
+  -c "{\"function\":\"UserLogout\",\"Args\":[\"$DID\"]}" \
+  --waitForEvent
+```
+
+### 7. 验证用户身份
 
 ```bash
 docker exec cli_mainchain peer chaincode query \
@@ -97,7 +119,22 @@ docker exec cli_mainchain peer chaincode query \
   -c "{\"function\":\"VerifyIdentity\",\"Args\":[\"$DID\", \"张三\"]}"
 ```
 
-### 7. 获取所有用户
+### 8. 更新用户风险评分
+
+```bash
+docker exec cli_mainchain peer chaincode invoke \
+  -o orderer.mainchain.com:8050 \
+  --tls \
+  --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/mainchain.com/orderers/orderer.mainchain.com/msp/tlscacerts/tlsca.mainchain.com-cert.pem \
+  -C mainchannel \
+  -n mainchaincc \
+  --peerAddresses peer0.org1.mainchain.com:8051 \
+  --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.mainchain.com/peers/peer0.org1.mainchain.com/tls/ca.crt \
+  -c "{\"function\":\"UpdateRiskScore\",\"Args\":[\"$DID\", \"30\"]}" \
+  --waitForEvent
+```
+
+### 9. 获取所有用户
 
 ```bash
 docker exec cli_mainchain peer chaincode query \
@@ -118,12 +155,31 @@ cd ../mainchain_docker
 
 # 调用命令
 ./mainchain_cli.sh invoke RegisterUser 李四 110101199001012345 13900139000 京B12345
+
+# 用户登录
+./mainchain_cli.sh invoke UserLogin $DID 张三
+
+# 用户登出
+./mainchain_cli.sh invoke UserLogout $DID
 ```
 
 注意：如果使用mainchain_cli.sh脚本，确保脚本中的函数调用使用双引号和转义，如下所示：
 ```bash
 docker exec cli_mainchain peer chaincode query -C $CHANNEL_NAME -n $CHAINCODE_NAME -c "{\"function\":\"$FUNC_NAME\",\"Args\":$ARGS}"
 ```
+
+## 链间通信工作流程
+
+1. **用户注册**：在主链上注册用户，生成DID
+2. **用户登录**：
+   - 用户在主链上登录，状态变为"online"
+   - transmit服务自动将用户状态同步到侧链，侧链状态也更新为"online"
+3. **风险行为报告**：
+   - 侧链记录用户的风险行为，计算风险评分
+   - transmit服务自动将侧链的风险评分同步到主链
+4. **用户登出**：
+   - 用户在主链上登出，状态变为"offline"
+   - transmit服务自动将用户状态同步到侧链，侧链状态也更新为"offline"
 
 ## 常见错误及解决方法
 
@@ -174,5 +230,3 @@ CHAINCODE_CONTAINER=$(docker ps -a | grep mainchaincc | head -n 1 | awk '{print 
 # 检查容器网络配置
 docker inspect $CHAINCODE_CONTAINER | grep -A 20 "NetworkSettings"
 ```
-
-

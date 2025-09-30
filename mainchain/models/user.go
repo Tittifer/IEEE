@@ -12,7 +12,11 @@ type UserInfo struct {
 
 // 用户状态常量
 const (
-	StatusActive = "active"
+	StatusActive   = "active"   // 用户活跃状态
+	StatusInactive = "inactive" // 用户非活跃状态
+	StatusRisky    = "risky"    // 用户风险状态
+	StatusOnline   = "online"   // 用户在线状态
+	StatusOffline  = "offline"  // 用户离线状态
 )
 
 // 风险评分相关常量
