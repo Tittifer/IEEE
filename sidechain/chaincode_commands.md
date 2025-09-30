@@ -34,7 +34,7 @@ docker exec cli_sidechain peer chaincode invoke \
   -n sidechaincc \
   --peerAddresses peer0.org1.sidechain.com:7051 \
   --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
-  -c '{"function":"InitLedger","Args":[]}' \
+  -c '{"function":"DIDContract:InitLedger","Args":[]}' \
   --waitForEvent
 ```
 
@@ -49,7 +49,7 @@ docker exec cli_sidechain peer chaincode invoke \
   -n sidechaincc \
   --peerAddresses peer0.org1.sidechain.com:7051 \
   --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
-  -c '{"function":"CreateDIDRecord","Args":["did:example:1234567890abcdef"]}' \
+  -c '{"function":"DIDContract:CreateDIDRecord","Args":["did:example:1234567890abcdef"]}' \
   --waitForEvent
 ```
 
@@ -59,7 +59,7 @@ docker exec cli_sidechain peer chaincode invoke \
 docker exec cli_sidechain peer chaincode query \
   -C sidechannel \
   -n sidechaincc \
-  -c '{"function":"GetDIDRecord","Args":["did:example:1234567890abcdef"]}'
+  -c '{"function":"DIDContract:GetDIDRecord","Args":["did:example:1234567890abcdef"]}'
 ```
 
 ### 4. 更新用户状态（登录）
@@ -73,7 +73,7 @@ docker exec cli_sidechain peer chaincode invoke \
   -n sidechaincc \
   --peerAddresses peer0.org1.sidechain.com:7051 \
   --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
-  -c '{"function":"UpdateUserStatus","Args":["did:example:1234567890abcdef", "online"]}' \
+  -c '{"function":"SessionContract:UpdateUserStatus","Args":["did:example:1234567890abcdef", "online"]}' \
   --waitForEvent
 ```
 
@@ -88,29 +88,20 @@ docker exec cli_sidechain peer chaincode invoke \
   -n sidechaincc \
   --peerAddresses peer0.org1.sidechain.com:7051 \
   --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
-  -c '{"function":"ReportRiskBehavior","Args":["did:example:1234567890abcdef", "A"]}' \
+  -c '{"function":"RiskContract:ReportRiskBehavior","Args":["did:example:1234567890abcdef", "A"]}' \
   --waitForEvent
 ```
 
-### 6. 评估用户风险评分
+### 6. 检查用户风险阈值
 
 ```bash
 docker exec cli_sidechain peer chaincode query \
   -C sidechannel \
   -n sidechaincc \
-  -c '{"function":"EvaluateRiskScore","Args":["did:example:1234567890abcdef"]}'
+  -c '{"function":"RiskContract:CheckRiskThreshold","Args":["did:example:1234567890abcdef"]}'
 ```
 
-### 7. 检查用户风险阈值
-
-```bash
-docker exec cli_sidechain peer chaincode query \
-  -C sidechannel \
-  -n sidechaincc \
-  -c '{"function":"CheckRiskThreshold","Args":["did:example:1234567890abcdef"]}'
-```
-
-### 8. 更新用户状态（登出）
+### 7. 更新用户状态（登出）
 
 ```bash
 docker exec cli_sidechain peer chaincode invoke \
@@ -121,37 +112,38 @@ docker exec cli_sidechain peer chaincode invoke \
   -n sidechaincc \
   --peerAddresses peer0.org1.sidechain.com:7051 \
   --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
-  -c '{"function":"UpdateUserStatus","Args":["did:example:1234567890abcdef", "offline"]}' \
+  -c '{"function":"SessionContract:UpdateUserStatus","Args":["did:example:1234567890abcdef", "offline"]}' \
   --waitForEvent
 ```
 
-### 9. 获取所有DID记录
+### 8. 获取所有DID记录
 
 ```bash
 docker exec cli_sidechain peer chaincode query \
   -C sidechannel \
   -n sidechaincc \
-  -c '{"function":"GetAllDIDRecords","Args":[]}'
+  -c '{"function":"DIDContract:GetAllDIDRecords","Args":[]}'
 ```
 
-## 使用sidechain_cli.sh简化命令
-
-sidechain_docker目录下的sidechain_cli.sh脚本可以简化链码调用：
+### 9. 获取用户会话信息
 
 ```bash
-cd ../sidechain_docker
-
-# 查询命令
-./sidechain_cli.sh query GetDIDRecord did:example:1234567890abcdef
-
-# 调用命令
-./sidechain_cli.sh invoke CreateDIDRecord did:example:9876543210fedcba
+docker exec cli_sidechain peer chaincode query \
+  -C sidechannel \
+  -n sidechaincc \
+  -c '{"function":"SessionContract:GetUserSession","Args":["did:example:1234567890abcdef"]}'
 ```
 
-注意：如果使用sidechain_cli.sh脚本，确保脚本中的函数调用使用双引号和转义，如下所示：
-```bash
-docker exec cli_sidechain peer chaincode query -C $CHANNEL_NAME -n $CHAINCODE_NAME -c "{\"function\":\"$FUNC_NAME\",\"Args\":$ARGS}"
-```
+## 风险评估工作流程
+
+1. **创建DID记录**：首先创建用户的DID记录
+2. **用户登录**：更新用户状态为"online"
+3. **报告风险行为**：当用户触发风险行为时，调用`RiskContract:ReportRiskBehavior`函数
+   - 系统会自动记录风险行为并增加严重程度
+   - 系统会自动计算并更新风险评分
+   - 在用户当前会话中首次触发风险行为时，系统会更新时间戳
+   - 时间间隔是本次登录首次触发风险行为和上次登录首次触发风险行为的时间差
+4. **用户登出**：更新用户状态为"offline"，系统会重置严重程度和风险触发标记
 
 ## 常见错误及解决方法
 
@@ -160,6 +152,8 @@ docker exec cli_sidechain peer chaincode query -C $CHANNEL_NAME -n $CHAINCODE_NA
 3. **网络连接问题**：确保网络已启动并且容器正在运行
 4. **链码容器启动失败**：检查docker网络配置，特别是`CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE`环境变量是否正确设置
 5. **链码超时错误**：可能需要增加链码启动超时时间，修改peer节点的core.yaml文件中的`startuptimeout`参数
+6. **找不到函数错误**：确保在函数名前加上合约名称前缀，例如`DIDContract:CreateDIDRecord`
+7. **用户未登录错误**：确保在报告风险行为前，用户已经通过`SessionContract:UpdateUserStatus`函数登录
 
 ## 调试技巧
 

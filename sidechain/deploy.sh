@@ -306,7 +306,7 @@ function initChaincode() {
       -C ${CHANNEL_NAME} \
       -n ${CHAINCODE_NAME} \
       --isInit \
-      -c '{"function":"InitLedger","Args":[]}' \
+      -c '{"function":"DIDContract:InitLedger","Args":[]}' \
       --peerAddresses peer0.org1.sidechain.com:7051 \
       --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
       --waitForEvent
@@ -332,26 +332,7 @@ function deployChaincode() {
   commitChaincode
   initChaincode
   
-  # 生成CLI交互脚本
-  generateCLIScript
-  
   successln "链码部署完成！"
-}
-
-# 生成CLI交互脚本
-function generateCLIScript() {
-  infoln "生成CLI交互脚本..."
-  
-  # 复制模板脚本到sidechain_docker目录
-  cp ${NETWORK_DIR}/sidechain_cli.sh ${NETWORK_DIR}/sidechain_cli.sh.bak
-  
-  # 更新脚本中的注释
-  sed -i "s/# 由deploy.sh自动生成/# 由deploy.sh自动生成 - $(date)/" ${NETWORK_DIR}/sidechain_cli.sh
-  
-  # 确保脚本有执行权限
-  chmod +x ${NETWORK_DIR}/sidechain_cli.sh
-  
-  successln "CLI交互脚本已更新"
 }
 
 # 测试链码
@@ -379,7 +360,7 @@ function testChaincode() {
     --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/sidechain.com/orderers/orderer.sidechain.com/msp/tlscacerts/tlsca.sidechain.com-cert.pem \
     -C ${CHANNEL_NAME} \
     -n ${CHAINCODE_NAME} \
-    -c '{"function":"InitLedger","Args":[]}' \
+    -c '{"function":"DIDContract:InitLedger","Args":[]}' \
     --peerAddresses peer0.org1.sidechain.com:7051 \
     --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
     --waitForEvent
@@ -393,7 +374,7 @@ function testChaincode() {
     --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/sidechain.com/orderers/orderer.sidechain.com/msp/tlscacerts/tlsca.sidechain.com-cert.pem \
     -C ${CHANNEL_NAME} \
     -n ${CHAINCODE_NAME} \
-    -c '{"function":"CreateDIDRecord","Args":["did:example:1234567890abcdef"]}' \
+    -c '{"function":"DIDContract:CreateDIDRecord","Args":["did:example:1234567890abcdef"]}' \
     --peerAddresses peer0.org1.sidechain.com:7051 \
     --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
     --waitForEvent
@@ -407,7 +388,7 @@ function testChaincode() {
     --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/sidechain.com/orderers/orderer.sidechain.com/msp/tlscacerts/tlsca.sidechain.com-cert.pem \
     -C ${CHANNEL_NAME} \
     -n ${CHAINCODE_NAME} \
-    -c '{"function":"UpdateUserStatus","Args":["did:example:1234567890abcdef", "online"]}' \
+    -c '{"function":"SessionContract:UpdateUserStatus","Args":["did:example:1234567890abcdef", "online"]}' \
     --peerAddresses peer0.org1.sidechain.com:7051 \
     --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
     --waitForEvent
@@ -421,19 +402,19 @@ function testChaincode() {
     --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/sidechain.com/orderers/orderer.sidechain.com/msp/tlscacerts/tlsca.sidechain.com-cert.pem \
     -C ${CHANNEL_NAME} \
     -n ${CHAINCODE_NAME} \
-    -c '{"function":"ReportRiskBehavior","Args":["did:example:1234567890abcdef", "A"]}' \
+    -c '{"function":"RiskContract:ReportRiskBehavior","Args":["did:example:1234567890abcdef", "A"]}' \
     --peerAddresses peer0.org1.sidechain.com:7051 \
     --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
     --waitForEvent
   
   sleep 3
   
-  # 测试4：评估用户风险评分
-  infoln "测试4：评估用户风险评分"
+  # 测试4：检查风险阈值
+  infoln "测试4：检查风险阈值"
   docker exec cli_sidechain peer chaincode query \
     -C ${CHANNEL_NAME} \
     -n ${CHAINCODE_NAME} \
-    -c '{"function":"EvaluateRiskScore","Args":["did:example:1234567890abcdef"]}'
+    -c '{"function":"RiskContract:CheckRiskThreshold","Args":["did:example:1234567890abcdef"]}'
   
   successln "链码测试完成！"
 }

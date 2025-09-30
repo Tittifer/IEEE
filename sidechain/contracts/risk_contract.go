@@ -94,41 +94,6 @@ func (c *RiskContract) UpdateRiskScore(ctx contractapi.TransactionContextInterfa
 	return nil
 }
 
-// EvaluateRiskScore 评估用户当前风险评分（不更新状态）
-func (c *RiskContract) EvaluateRiskScore(ctx contractapi.TransactionContextInterface, did string) (int, error) {
-	// 验证DID是否存在
-	didContract := new(DIDContract)
-	exists, err := didContract.DIDExists(ctx, did)
-	if err != nil {
-		return 0, fmt.Errorf("检查DID是否存在时出错: %v", err)
-	}
-	if !exists {
-		return 0, fmt.Errorf("DID %s 不存在", did)
-	}
-
-	// 获取当前DID记录
-	didRecord, err := didContract.GetDIDRecord(ctx, did)
-	if err != nil {
-		return 0, fmt.Errorf("获取DID记录时出错: %v", err)
-	}
-
-	// 获取当前时间戳
-	timestamp, err := ctx.GetStub().GetTxTimestamp()
-	if err != nil {
-		return 0, fmt.Errorf("获取交易时间戳失败: %v", err)
-	}
-	currentTime := timestamp.Seconds
-
-	// 计算衰减后的风险评分
-	decayedScore := utils.CalculateScoreDecay(
-		didRecord.RiskScore,
-		didRecord.Timestamp,
-		currentTime,
-	)
-
-	return decayedScore, nil
-}
-
 // ReportRiskBehavior 报告风险行为并更新评分
 func (c *RiskContract) ReportRiskBehavior(ctx contractapi.TransactionContextInterface, did string, behaviorType string) error {
 	// 验证DID是否存在
@@ -159,12 +124,22 @@ func (c *RiskContract) ReportRiskBehavior(ctx contractapi.TransactionContextInte
 
 // CheckRiskThreshold 检查用户风险评分是否超过阈值
 func (c *RiskContract) CheckRiskThreshold(ctx contractapi.TransactionContextInterface, did string) (bool, error) {
-	// 评估当前风险评分
-	currentScore, err := c.EvaluateRiskScore(ctx, did)
+	// 验证DID是否存在
+	didContract := new(DIDContract)
+	exists, err := didContract.DIDExists(ctx, did)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("检查DID是否存在时出错: %v", err)
+	}
+	if !exists {
+		return false, fmt.Errorf("DID %s 不存在", did)
+	}
+
+	// 获取当前DID记录
+	didRecord, err := didContract.GetDIDRecord(ctx, did)
+	if err != nil {
+		return false, fmt.Errorf("获取DID记录时出错: %v", err)
 	}
 
 	// 检查是否超过阈值
-	return currentScore > models.RiskScoreThreshold, nil
+	return didRecord.RiskScore > models.RiskScoreThreshold, nil
 }

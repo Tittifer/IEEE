@@ -88,7 +88,6 @@ DID管理合约，处理DID记录的创建和查询。
 风险评估合约，处理风险评分的计算和更新。
 
 - **UpdateRiskScore**: 更新用户风险评分
-- **EvaluateRiskScore**: 评估用户当前风险评分
 - **ReportRiskBehavior**: 报告风险行为并更新评分
 - **CheckRiskThreshold**: 检查用户风险评分是否超过阈值
 
@@ -120,57 +119,83 @@ DID管理合约，处理DID记录的创建和查询。
 
 ### 1. 创建DID记录
 
-```
-peer chaincode invoke -C sidechannel -n sidechaincc -c '{"function":"CreateDIDRecord","Args":["did:example:1234567890abcdef"]}'
+```bash
+docker exec cli_sidechain peer chaincode invoke \
+  -o orderer.sidechain.com:7050 \
+  --tls \
+  --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/sidechain.com/orderers/orderer.sidechain.com/msp/tlscacerts/tlsca.sidechain.com-cert.pem \
+  -C sidechannel \
+  -n sidechaincc \
+  --peerAddresses peer0.org1.sidechain.com:7051 \
+  --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
+  -c '{"function":"DIDContract:CreateDIDRecord","Args":["did:example:1234567890abcdef"]}' \
+  --waitForEvent
 ```
 
 ### 2. 更新用户状态（登录）
 
-```
-peer chaincode invoke -C sidechannel -n sidechaincc -c '{"function":"UpdateUserStatus","Args":["did:example:1234567890abcdef", "online"]}'
+```bash
+docker exec cli_sidechain peer chaincode invoke \
+  -o orderer.sidechain.com:7050 \
+  --tls \
+  --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/sidechain.com/orderers/orderer.sidechain.com/msp/tlscacerts/tlsca.sidechain.com-cert.pem \
+  -C sidechannel \
+  -n sidechaincc \
+  --peerAddresses peer0.org1.sidechain.com:7051 \
+  --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
+  -c '{"function":"SessionContract:UpdateUserStatus","Args":["did:example:1234567890abcdef", "online"]}' \
+  --waitForEvent
 ```
 
 ### 3. 报告风险行为
 
-```
-peer chaincode invoke -C sidechannel -n sidechaincc -c '{"function":"ReportRiskBehavior","Args":["did:example:1234567890abcdef", "A"]}'
+```bash
+docker exec cli_sidechain peer chaincode invoke \
+  -o orderer.sidechain.com:7050 \
+  --tls \
+  --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/sidechain.com/orderers/orderer.sidechain.com/msp/tlscacerts/tlsca.sidechain.com-cert.pem \
+  -C sidechannel \
+  -n sidechaincc \
+  --peerAddresses peer0.org1.sidechain.com:7051 \
+  --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
+  -c '{"function":"RiskContract:ReportRiskBehavior","Args":["did:example:1234567890abcdef", "A"]}' \
+  --waitForEvent
 ```
 
-### 4. 评估用户风险评分
+### 4. 检查用户风险阈值
 
-```
-peer chaincode query -C sidechannel -n sidechaincc -c '{"function":"EvaluateRiskScore","Args":["did:example:1234567890abcdef"]}'
+```bash
+docker exec cli_sidechain peer chaincode query \
+  -C sidechannel \
+  -n sidechaincc \
+  -c '{"function":"RiskContract:CheckRiskThreshold","Args":["did:example:1234567890abcdef"]}'
 ```
 
 ### 5. 更新用户状态（登出）
 
-```
-peer chaincode invoke -C sidechannel -n sidechaincc -c '{"function":"UpdateUserStatus","Args":["did:example:1234567890abcdef", "offline"]}'
+```bash
+docker exec cli_sidechain peer chaincode invoke \
+  -o orderer.sidechain.com:7050 \
+  --tls \
+  --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/sidechain.com/orderers/orderer.sidechain.com/msp/tlscacerts/tlsca.sidechain.com-cert.pem \
+  -C sidechannel \
+  -n sidechaincc \
+  --peerAddresses peer0.org1.sidechain.com:7051 \
+  --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer0.org1.sidechain.com/tls/ca.crt \
+  -c '{"function":"SessionContract:UpdateUserStatus","Args":["did:example:1234567890abcdef", "offline"]}' \
+  --waitForEvent
 ```
 
 ## 部署说明
 
 1. 安装依赖：
-   ```
+   ```bash
    go mod tidy
    ```
 
-2. 打包链码：
-   ```
-   peer lifecycle chaincode package sidechaincc.tar.gz --path /path/to/chaincode --lang golang --label sidechaincc_1.0
-   ```
-
-3. 安装链码：
-   ```
-   peer lifecycle chaincode install sidechaincc.tar.gz
-   ```
-
-4. 批准链码定义：
-   ```
-   peer lifecycle chaincode approveformyorg -o orderer.sidechain.com:8050 --channelID sidechannel --name sidechaincc --version 1.0 --package-id $PACKAGE_ID --sequence 1 --tls --cafile /path/to/orderer/tls/ca.crt
-   ```
-
-5. 提交链码定义：
-   ```
-   peer lifecycle chaincode commit -o orderer.sidechain.com:8050 --channelID sidechannel --name sidechaincc --version 1.0 --sequence 1 --tls --cafile /path/to/orderer/tls/ca.crt
+2. 使用deploy.sh脚本部署链码：
+   ```bash
+   ./deploy.sh -n    # 启动网络
+   ./deploy.sh -d    # 部署链码
+   ./deploy.sh -t    # 测试链码
    ```
