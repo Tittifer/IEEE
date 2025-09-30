@@ -106,7 +106,7 @@ function generateGenesisBlock() {
   fi
   
   # 生成应用通道交易
-  configtxgen -profile TwoOrgsChannel -outputCreateChannelTx ${ROOTDIR}/channel-artifacts/channel.tx -channelID mychannel
+  configtxgen -profile TwoOrgsChannel -outputCreateChannelTx ${ROOTDIR}/channel-artifacts/channel.tx -channelID sidechannel
   
   if [ $? -ne 0 ]; then
     errorln "生成通道交易失败"
@@ -114,7 +114,7 @@ function generateGenesisBlock() {
   fi
   
   # 生成锚节点更新交易
-  configtxgen -profile TwoOrgsChannel -outputAnchorPeersUpdate ${ROOTDIR}/channel-artifacts/Org1MSPanchors.tx -channelID mychannel -asOrg Org1MSP
+  configtxgen -profile TwoOrgsChannel -outputAnchorPeersUpdate ${ROOTDIR}/channel-artifacts/Org1MSPanchors.tx -channelID sidechannel -asOrg Org1MSP
   
   if [ $? -ne 0 ]; then
     errorln "生成锚节点更新交易失败"
@@ -164,7 +164,7 @@ function createChannel() {
   infoln "创建通道..."
   
   # 进入CLI容器创建通道
-  docker exec cli peer channel create -o orderer.sidechain.com:7050 -c mychannel -f /opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts/channel.tx --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/sidechain.com/orderers/orderer.sidechain.com/msp/tlscacerts/tlsca.sidechain.com-cert.pem
+  docker exec cli_sidechain peer channel create -o orderer.sidechain.com:7050 -c sidechannel -f /opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts/channel.tx --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/sidechain.com/orderers/orderer.sidechain.com/msp/tlscacerts/tlsca.sidechain.com-cert.pem
   
   if [ $? -ne 0 ]; then
     errorln "创建通道失败"
@@ -172,7 +172,7 @@ function createChannel() {
   fi
   
   # peer0.org1加入通道
-  docker exec cli peer channel join -b mychannel.block
+  docker exec cli_sidechain peer channel join -b sidechannel.block
   
   if [ $? -ne 0 ]; then
     errorln "peer0.org1加入通道失败"
@@ -184,7 +184,7 @@ function createChannel() {
               -e CORE_PEER_TLS_CERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer1.org1.sidechain.com/tls/server.crt \
               -e CORE_PEER_TLS_KEY_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer1.org1.sidechain.com/tls/server.key \
               -e CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.sidechain.com/peers/peer1.org1.sidechain.com/tls/ca.crt \
-              cli peer channel join -b mychannel.block
+              cli_sidechain peer channel join -b sidechannel.block
   
   if [ $? -ne 0 ]; then
     errorln "peer1.org1加入通道失败"
@@ -192,7 +192,7 @@ function createChannel() {
   fi
   
   # 更新锚节点
-  docker exec cli peer channel update -o orderer.sidechain.com:7050 -c mychannel -f /opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts/Org1MSPanchors.tx --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/sidechain.com/orderers/orderer.sidechain.com/msp/tlscacerts/tlsca.sidechain.com-cert.pem
+  docker exec cli_sidechain peer channel update -o orderer.sidechain.com:7050 -c sidechannel -f /opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts/Org1MSPanchors.tx --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/sidechain.com/orderers/orderer.sidechain.com/msp/tlscacerts/tlsca.sidechain.com-cert.pem
   
   if [ $? -ne 0 ]; then
     errorln "更新锚节点失败"
