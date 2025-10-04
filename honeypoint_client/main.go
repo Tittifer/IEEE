@@ -86,7 +86,7 @@ func showMainMenu() {
 // 启动事件监听
 func startEventListener() {
 	fmt.Println("\n===== 启动事件监听 =====")
-	fmt.Println("正在监听链码事件，按Ctrl+C退出...")
+	fmt.Println("正在监听链码事件和风险行为输入，按Ctrl+C退出...")
 
 	// 设置退出信号处理
 	quit := make(chan os.Signal, 1)
@@ -97,6 +97,9 @@ func startEventListener() {
 	if err != nil {
 		log.Fatalf("启动事件监听失败: %v", err)
 	}
+	
+	// 启动风险行为输入监听
+	honeypointClient.StartRiskInputListener()
 
 	// 处理事件和退出信号
 	for {

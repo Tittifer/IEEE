@@ -22,6 +22,7 @@ type UserClient struct {
 	gateway  *client.Gateway
 	conn     *grpc.ClientConn
 	config   *ConnectionConfig
+	currentDID string // 当前登录用户的DID
 }
 
 // 用户事件结构体，用于解析链码事件
@@ -37,6 +38,7 @@ type UserEvent struct {
 const (
 	identityContract = "IdentityContract"
 	configPath       = "../config.json"
+	riskScoreThreshold = 50 // 风险评分阈值
 )
 
 // NewUserClient 创建新的用户客户端
@@ -170,14 +172,35 @@ func (c *UserClient) UserLogin(did, name string) (string, error) {
 		return "", fmt.Errorf("DID和姓名不能为空")
 	}
 	
+	// 获取用户信息，检查风险评分
+	userJSON, err := c.contract.EvaluateTransaction(identityContract+":GetUser", did)
+	if err == nil && len(userJSON) > 0 {
+		// 解析用户信息
+		var user struct {
+			RiskScore int `json:"riskScore"`
+		}
+		if err := json.Unmarshal(userJSON, &user); err == nil {
+			// 检查风险评分是否超过阈值
+			if user.RiskScore >= riskScoreThreshold {
+				return "", fmt.Errorf("登录失败：用户风险评分过高 (%d)，超过阈值 (%d)", user.RiskScore, riskScoreThreshold)
+			}
+		}
+	}
+	
 	// 调用链码用户登录
 	result, err := c.contract.SubmitTransaction(identityContract+":UserLogin", did, name)
 	if err != nil {
 		return "", fmt.Errorf("提交交易失败: %w", err)
 	}
 	
+	// 记录当前登录用户的DID
+	c.currentDID = did
+	
 	loginResult := string(result)
 	log.Printf("登录结果: %s", loginResult)
+	
+	// 启动风险评分监控
+	go c.monitorRiskScore(did)
 	
 	return loginResult, nil
 }
@@ -195,6 +218,11 @@ func (c *UserClient) UserLogout(did string) (string, error) {
 	result, err := c.contract.SubmitTransaction(identityContract+":UserLogout", did)
 	if err != nil {
 		return "", fmt.Errorf("提交交易失败: %w", err)
+	}
+	
+	// 如果登出的是当前用户，清除currentDID
+	if c.currentDID == did {
+		c.currentDID = ""
 	}
 	
 	logoutResult := string(result)
@@ -243,6 +271,54 @@ func (c *UserClient) GetDIDByInfo(name, idNumber, phoneNumber, vehicleID string)
 	}
 	
 	return string(result), nil
+}
+
+// monitorRiskScore 监控用户风险评分，如果超过阈值则强制登出
+func (c *UserClient) monitorRiskScore(did string) {
+	// 每10秒检查一次风险评分
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	
+	for range ticker.C {
+		// 如果用户已经登出，停止监控
+		if c.currentDID != did {
+			log.Printf("用户 %s 已登出，停止风险评分监控", did)
+			return
+		}
+		
+		// 获取用户信息
+		userJSON, err := c.contract.EvaluateTransaction(identityContract+":GetUser", did)
+		if err != nil {
+			log.Printf("获取用户 %s 信息失败: %v", did, err)
+			continue
+		}
+		
+		// 解析用户信息
+		var user struct {
+			RiskScore int    `json:"riskScore"`
+			Name      string `json:"name"`
+		}
+		if err := json.Unmarshal(userJSON, &user); err != nil {
+			log.Printf("解析用户 %s 信息失败: %v", did, err)
+			continue
+		}
+		
+		// 检查风险评分是否超过阈值
+		if user.RiskScore >= riskScoreThreshold {
+			log.Printf("用户 %s 风险评分 %d 超过阈值 %d，强制登出", did, user.RiskScore, riskScoreThreshold)
+			
+			// 强制登出用户
+			_, err := c.UserLogout(did)
+			if err != nil {
+				log.Printf("强制登出用户 %s 失败: %v", did, err)
+			} else {
+				log.Printf("已强制登出用户 %s", did)
+				fmt.Printf("\n警告: 由于风险评分过高 (%d)，系统已强制登出用户 %s\n", user.RiskScore, user.Name)
+			}
+			
+			return
+		}
+	}
 }
 
 // 辅助函数：加载证书

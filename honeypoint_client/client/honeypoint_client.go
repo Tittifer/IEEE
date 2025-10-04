@@ -22,6 +22,8 @@ type HoneypointClient struct {
 	gateway  *client.Gateway
 	conn     *grpc.ClientConn
 	config   *ConnectionConfig
+	riskManager *RiskScoreManager // 风险评分管理器
+	riskInput   *RiskInputManager // 风险行为输入管理器
 }
 
 // UserEvent 用户事件结构体，用于解析链码事件
@@ -120,11 +122,22 @@ func NewHoneypointClient() (*HoneypointClient, error) {
 		config:   config,
 	}
 	
+	// 创建风险评分管理器并关联到客户端
+	honeypointClient.riskManager = NewRiskScoreManager(honeypointClient)
+	
+	// 创建风险行为输入管理器并关联到客户端
+	honeypointClient.riskInput = NewRiskInputManager(honeypointClient)
+	
 	return honeypointClient, nil
 }
 
 // Close 关闭连接
 func (c *HoneypointClient) Close() {
+	// 如果风险行为输入管理器正在运行，先停止它
+	if c.riskInput != nil {
+		c.riskInput.Stop()
+	}
+	
 	c.gateway.Close()
 	c.conn.Close()
 }
@@ -199,6 +212,15 @@ func (c *HoneypointClient) StartEventListener() (chan UserEvent, error) {
 	return eventCh, nil
 }
 
+// StartRiskInputListener 启动风险行为输入监听
+func (c *HoneypointClient) StartRiskInputListener() {
+	if c.riskInput != nil {
+		c.riskInput.Start()
+	} else {
+		log.Println("风险行为输入管理器未初始化")
+	}
+}
+
 // ProcessEvent 处理用户事件
 func (c *HoneypointClient) ProcessEvent(event UserEvent) {
 	log.Printf("处理事件: %s, DID: %s, 用户名: %s", event.EventType, event.DID, event.Name)
@@ -221,8 +243,8 @@ func (c *HoneypointClient) ProcessEvent(event UserEvent) {
 func (c *HoneypointClient) handleUserRegistration(event UserEvent) {
 	log.Printf("处理用户注册: DID=%s, 用户名=%s, 时间戳=%d", event.DID, event.Name, event.Timestamp)
 	
-	// 在这里实现用户注册后的业务逻辑
-	// 例如：发送欢迎邮件、初始化用户账户等
+	// 在风险评分管理器中注册用户，初始化风险评分为0
+	c.riskManager.RegisterUser(event.DID)
 	
 	log.Printf("用户 %s 注册成功处理完成", event.Name)
 }
@@ -231,8 +253,8 @@ func (c *HoneypointClient) handleUserRegistration(event UserEvent) {
 func (c *HoneypointClient) handleUserLogin(event UserEvent) {
 	log.Printf("处理用户登录: DID=%s, 用户名=%s, 时间戳=%d", event.DID, event.Name, event.Timestamp)
 	
-	// 在这里实现用户登录后的业务逻辑
-	// 例如：记录登录日志、检查异常登录等
+	// 确保用户在风险评分管理器中注册
+	c.riskManager.UserLogin(event.DID)
 	
 	log.Printf("用户 %s 登录成功处理完成", event.Name)
 }
@@ -241,8 +263,8 @@ func (c *HoneypointClient) handleUserLogin(event UserEvent) {
 func (c *HoneypointClient) handleUserLogout(event UserEvent) {
 	log.Printf("处理用户登出: DID=%s, 用户名=%s, 时间戳=%d", event.DID, event.Name, event.Timestamp)
 	
-	// 在这里实现用户登出后的业务逻辑
-	// 例如：清理会话、记录使用时长等
+	// 记录用户登出事件
+	c.riskManager.UserLogout(event.DID)
 	
 	log.Printf("用户 %s 登出成功处理完成", event.Name)
 }
@@ -252,8 +274,11 @@ func (c *HoneypointClient) handleRiskUpdate(event UserEvent) {
 	log.Printf("处理风险评分更新: DID=%s, 用户名=%s, 风险评分=%d, 时间戳=%d", 
 		event.DID, event.Name, event.RiskScore, event.Timestamp)
 	
-	// 在这里实现风险评分更新后的业务逻辑
-	// 例如：发送风险警告、限制用户操作等
+	// 检查是否超过风险阈值，如果超过则记录警告
+	if event.RiskScore >= RiskScoreThreshold {
+		log.Printf("警告：用户 %s 风险评分 %d 已超过阈值 %d", 
+			event.Name, event.RiskScore, RiskScoreThreshold)
+	}
 	
 	log.Printf("用户 %s 风险评分更新处理完成", event.Name)
 }

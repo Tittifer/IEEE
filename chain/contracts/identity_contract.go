@@ -199,11 +199,7 @@ func (c *IdentityContract) UserLogin(ctx contractapi.TransactionContextInterface
 		return "登录失败：用户名不匹配", nil
 	}
 	
-	// 验证用户状态是否为活跃
-	if userInfo.Status != models.StatusActive {
-		// 用户状态不活跃，返回登录失败信息
-		return "登录失败：用户状态不活跃", nil
-	}
+	// 不再验证用户状态是否为活跃
 	
 	// 检查用户风险评分
 	if userInfo.RiskScore > models.RiskScoreThreshold {
