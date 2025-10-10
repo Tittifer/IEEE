@@ -47,7 +47,7 @@ func (r *RiskInputManager) Start() {
 	go r.listenForInput()
 	
 	log.Println("风险行为输入监听已启动，请输入用户DID和风险行为（格式：DID:行为类型）")
-	log.Println("例如：user123:A 或 user123:B")
+	log.Println("例如：did:example:123:A 或 did:example:123:B")
 }
 
 // Stop 停止风险行为输入监听

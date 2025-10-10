@@ -8,6 +8,8 @@ require (
 )
 
 require (
+	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/go-sql-driver/mysql v1.9.3 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/hyperledger/fabric-protos-go-apiv2 v0.2.0 // indirect
 	github.com/miekg/pkcs11 v1.1.1 // indirect

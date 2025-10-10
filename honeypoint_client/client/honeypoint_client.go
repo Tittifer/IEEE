@@ -24,6 +24,7 @@ type HoneypointClient struct {
 	config   *ConnectionConfig
 	riskManager *RiskScoreManager // 风险评分管理器
 	riskInput   *RiskInputManager // 风险行为输入管理器
+	dbManager   *DBManager        // 数据库管理器
 }
 
 // UserEvent 用户事件结构体，用于解析链码事件
@@ -121,9 +122,26 @@ func NewHoneypointClient() (*HoneypointClient, error) {
 		conn:     conn,
 		config:   config,
 	}
+
+	// 创建数据库管理器
+	dbConfig := &DBConfig{
+		Host:     "localhost",
+		Port:     3306,
+		User:     "root",
+		Password: "1",
+		DBName:   "ieee_honeypoint",
+	}
+	
+	dbManager, err := NewDBManager(dbConfig)
+	if err != nil {
+		conn.Close()
+		gw.Close()
+		return nil, fmt.Errorf("创建数据库管理器失败: %w", err)
+	}
+	honeypointClient.dbManager = dbManager
 	
 	// 创建风险评分管理器并关联到客户端
-	honeypointClient.riskManager = NewRiskScoreManager(honeypointClient)
+	honeypointClient.riskManager = NewRiskScoreManager(honeypointClient, dbManager)
 	
 	// 创建风险行为输入管理器并关联到客户端
 	honeypointClient.riskInput = NewRiskInputManager(honeypointClient)
@@ -136,6 +154,11 @@ func (c *HoneypointClient) Close() {
 	// 如果风险行为输入管理器正在运行，先停止它
 	if c.riskInput != nil {
 		c.riskInput.Stop()
+	}
+	
+	// 关闭数据库连接
+	if c.dbManager != nil {
+		c.dbManager.Close()
 	}
 	
 	c.gateway.Close()
@@ -244,7 +267,7 @@ func (c *HoneypointClient) handleUserRegistration(event UserEvent) {
 	log.Printf("处理用户注册: DID=%s, 用户名=%s, 时间戳=%d", event.DID, event.Name, event.Timestamp)
 	
 	// 在风险评分管理器中注册用户，初始化风险评分为0
-	c.riskManager.RegisterUser(event.DID)
+	c.riskManager.RegisterUser(event.DID, event.Name)
 	
 	log.Printf("用户 %s 注册成功处理完成", event.Name)
 }
