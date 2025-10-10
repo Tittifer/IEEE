@@ -20,24 +20,24 @@ type User struct {
 	ID           int       `json:"id"`
 	DID          string    `json:"did"`
 	Name         string    `json:"name"`
-	CurrentScore int       `json:"currentScore"`
+	CurrentScore float64   `json:"currentScore"` // 修改为float64类型
 	LastUpdate   time.Time `json:"lastUpdate"`
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
 // RiskRule 风险规则结构体
 type RiskRule struct {
-	ID           int    `json:"id"`
-	BehaviorType string `json:"behaviorType"`
-	Score        int    `json:"score"`
-	Description  string `json:"description"`
+	ID           int     `json:"id"`
+	BehaviorType string  `json:"behaviorType"`
+	Score        float64 `json:"score"` // 修改为float64类型
+	Description  string  `json:"description"`
 }
 
 // RiskBehavior 风险行为记录结构体
 type RiskBehavior struct {
 	ID           int       `json:"id"`
 	BehaviorType string    `json:"behaviorType"`
-	Score        int       `json:"score"`
+	Score        float64   `json:"score"` // 修改为float64类型
 	Timestamp    time.Time `json:"timestamp"`
 }
 
@@ -115,7 +115,7 @@ func (m *DBManager) initTables() error {
 			id INT AUTO_INCREMENT PRIMARY KEY,
 			did VARCHAR(255) NOT NULL UNIQUE,
 			name VARCHAR(255),
-			current_score INT DEFAULT 0,
+			current_score DECIMAL(10,2) DEFAULT 0.00,
 			last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)
@@ -129,7 +129,7 @@ func (m *DBManager) initTables() error {
 		CREATE TABLE IF NOT EXISTS risk_rules (
 			id INT AUTO_INCREMENT PRIMARY KEY,
 			behavior_type VARCHAR(50) NOT NULL UNIQUE,
-			score INT NOT NULL,
+			score DECIMAL(10,2) DEFAULT 0.00,
 			description VARCHAR(255)
 		)
 	`)
@@ -168,7 +168,7 @@ func (m *DBManager) createUserBehaviorTable(did string) error {
 			CREATE TABLE %s (
 				id INT AUTO_INCREMENT PRIMARY KEY,
 				behavior_type VARCHAR(50) NOT NULL,
-				score INT NOT NULL,
+				score DECIMAL(10,2) DEFAULT 0.00,
 				timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 			)
 		`, tableName)
@@ -202,50 +202,50 @@ func (m *DBManager) initRiskRules() error {
 	// 定义风险规则
 	rules := []struct {
 		behaviorType string
-		score        int
+		score        float64 // 修改为float64类型
 		description  string
 	}{
 		// 路径深度相关规则
-		{"edge_honeypot", 2, "访问非关键蜜点"},
-		{"business_honeypot", 6, "访问业务处理类蜜点"},
-		{"core_honeypot", 9, "访问模拟核心控制系统的蜜点"},
+		{"edge_honeypot", 2.00, "访问非关键蜜点"},
+		{"business_honeypot", 6.00, "访问业务处理类蜜点"},
+		{"core_honeypot", 9.00, "访问模拟核心控制系统的蜜点"},
 		
 		// 路径复杂度相关规则
-		{"linear_access", 1, "按预设路径顺序访问蜜点"},
-		{"multi_branch_access", 4, "在多个蜜点分支间跳跃访问"},
-		{"cross_domain_access", 7, "跨越不同安全域访问蜜点"},
+		{"linear_access", 1.00, "按预设路径顺序访问蜜点"},
+		{"multi_branch_access", 4.00, "在多个蜜点分支间跳跃访问"},
+		{"cross_domain_access", 7.00, "跨越不同安全域访问蜜点"},
 		
 		// 权限提升相关规则
-		{"no_privilege_escalation", 0, "保持初始权限访问蜜点"},
-		{"normal_privilege_escalation", 4, "获取普通用户权限蜜点访问权"},
-		{"admin_privilege_escalation", 7, "访问模拟高权限系统的蜜点"},
+		{"no_privilege_escalation", 0.00, "保持初始权限访问蜜点"},
+		{"normal_privilege_escalation", 4.00, "获取普通用户权限蜜点访问权"},
+		{"admin_privilege_escalation", 7.00, "访问模拟高权限系统的蜜点"},
 		
 		// 节点关键性相关规则
-		{"info_display_honeypot", 1, "访问只读信息类蜜点"},
-		{"data_collection_honeypot", 4, "访问数据采集模拟节点"},
-		{"business_control_honeypot", 7, "访问业务控制模拟节点"},
-		{"core_control_honeypot", 10, "访问模拟核心控制系统的蜜点"},
+		{"info_display_honeypot", 1.00, "访问只读信息类蜜点"},
+		{"data_collection_honeypot", 4.00, "访问数据采集模拟节点"},
+		{"business_control_honeypot", 7.00, "访问业务控制模拟节点"},
+		{"core_control_honeypot", 10.00, "访问模拟核心控制系统的蜜点"},
 		
 		// 操作危险性相关规则
-		{"harmless_probe", 0, "仅调用信息查询接口"},
-		{"sensitive_info_query", 2, "调用敏感信息接口"},
-		{"parameter_modification", 5, "调用参数修改接口"},
-		{"control_command", 8, "调用控制指令接口"},
+		{"harmless_probe", 0.00, "仅调用信息查询接口"},
+		{"sensitive_info_query", 2.00, "调用敏感信息接口"},
+		{"parameter_modification", 5.00, "调用参数修改接口"},
+		{"control_command", 8.00, "调用控制指令接口"},
 		
 		// 目标性相关规则
-		{"random_scan", 1, "无目标调用多个蜜点"},
-		{"targeted_wrong_path", 3, "目标明确但调用路径不合理"},
-		{"precise_high_value", 6, "直接调用高价值蜜点接口"},
+		{"random_scan", 1.00, "无目标调用多个蜜点"},
+		{"targeted_wrong_path", 3.00, "目标明确但调用路径不合理"},
+		{"precise_high_value", 6.00, "直接调用高价值蜜点接口"},
 		
 		// 调用频率相关规则
-		{"low_frequency", 1, "调用间隔 > 10分钟"},
-		{"medium_frequency", 3, "调用间隔 1-10分钟"},
-		{"high_frequency", 6, "调用间隔 < 1分钟"},
+		{"low_frequency", 1.00, "调用间隔 > 10分钟"},
+		{"medium_frequency", 3.00, "调用间隔 1-10分钟"},
+		{"high_frequency", 6.00, "调用间隔 < 1分钟"},
 		
 		// 一票否决规则
-		{"destructive_command", 100, "调用模拟破坏性指令的蜜点接口"},
-		{"highest_privilege", 100, "调用模拟系统最高权限的蜜点接口"},
-		{"coordinated_attack", 100, "同时从多个入口调用蜜点，表现出协同攻击特征"},
+		{"destructive_command", 100.00, "调用模拟破坏性指令的蜜点接口"},
+		{"highest_privilege", 100.00, "调用模拟系统最高权限的蜜点接口"},
+		{"coordinated_attack", 100.00, "同时从多个入口调用蜜点，表现出协同攻击特征"},
 	}
 
 	// 插入风险规则
@@ -279,7 +279,7 @@ func (m *DBManager) CreateUser(did, name string) (int, error) {
 	// 插入新用户
 	result, err := m.db.Exec(
 		"INSERT INTO users (did, name, current_score) VALUES (?, ?, ?)",
-		did, name, 0,
+		did, name, 0.00, // 修改为浮点数
 	)
 	if err != nil {
 		return 0, fmt.Errorf("创建用户失败: %w", err)
@@ -324,7 +324,7 @@ func (m *DBManager) GetUserByDID(did string) (*User, error) {
 }
 
 // UpdateUserRiskScore 更新用户风险评分
-func (m *DBManager) UpdateUserRiskScore(userID int, newScore int) error {
+func (m *DBManager) UpdateUserRiskScore(userID int, newScore float64) error { // 修改为float64类型
 	_, err := m.db.Exec(
 		"UPDATE users SET current_score = ?, last_update = CURRENT_TIMESTAMP WHERE id = ?",
 		newScore, userID,
@@ -356,7 +356,7 @@ func (m *DBManager) GetRiskRuleByType(behaviorType string) (*RiskRule, error) {
 }
 
 // RecordRiskBehavior 记录用户风险行为
-func (m *DBManager) RecordRiskBehavior(userID int, behaviorType string, score int) error {
+func (m *DBManager) RecordRiskBehavior(userID int, behaviorType string, score float64) error { // 修改为float64类型
 	// 首先获取用户DID
 	var did string
 	err := m.db.QueryRow("SELECT did FROM users WHERE id = ?", userID).Scan(&did)

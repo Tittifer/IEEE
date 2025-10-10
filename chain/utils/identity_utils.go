@@ -57,6 +57,6 @@ func ValidateDID(did string) bool {
 
 // CalculateInitialRiskScore 计算用户初始风险值
 // 目前简单返回固定值，未来可以基于用户信息进行计算
-func CalculateInitialRiskScore() int {
-	return 0 // 初始风险值为0
+func CalculateInitialRiskScore() float64 {
+	return 0.00 // 初始风险值为0，修改为浮点数
 }

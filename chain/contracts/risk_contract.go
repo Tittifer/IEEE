@@ -30,8 +30,8 @@ func (c *RiskContract) UpdateRiskScore(ctx contractapi.TransactionContextInterfa
 		return fmt.Errorf("无效的DID格式: %s", did)
 	}
 	
-	// 将字符串转换为整数
-	newScore, err := strconv.Atoi(newScoreStr)
+	// 将字符串转换为浮点数
+	newScore, err := strconv.ParseFloat(newScoreStr, 64)
 	if err != nil {
 		return fmt.Errorf("风险评分格式无效: %v", err)
 	}
@@ -76,26 +76,26 @@ func (c *RiskContract) UpdateRiskScore(ctx contractapi.TransactionContextInterfa
 }
 
 // GetRiskScore 获取用户风险评分
-func (c *RiskContract) GetRiskScore(ctx contractapi.TransactionContextInterface, did string) (int, error) {
+func (c *RiskContract) GetRiskScore(ctx contractapi.TransactionContextInterface, did string) (float64, error) {
 	// 验证DID格式
 	if !utils.ValidateDID(did) {
-		return 0, fmt.Errorf("无效的DID格式: %s", did)
+		return 0.0, fmt.Errorf("无效的DID格式: %s", did)
 	}
 	
 	// 从账本中读取用户信息
 	userInfoJSON, err := ctx.GetStub().GetState(did)
 	if err != nil {
-		return 0, fmt.Errorf("读取用户信息时出错: %v", err)
+		return 0.0, fmt.Errorf("读取用户信息时出错: %v", err)
 	}
 	if userInfoJSON == nil {
-		return 0, fmt.Errorf("用户DID %s 不存在", did)
+		return 0.0, fmt.Errorf("用户DID %s 不存在", did)
 	}
 	
 	// 反序列化用户信息
 	var userInfo models.UserInfo
 	err = json.Unmarshal(userInfoJSON, &userInfo)
 	if err != nil {
-		return 0, fmt.Errorf("用户信息反序列化失败: %v", err)
+		return 0.0, fmt.Errorf("用户信息反序列化失败: %v", err)
 	}
 	
 	return userInfo.RiskScore, nil
@@ -156,13 +156,13 @@ func (c *RiskContract) GetHighRiskUsers(ctx contractapi.TransactionContextInterf
 
 // GetUsersByRiskScoreRange 获取特定风险评分范围内的用户
 func (c *RiskContract) GetUsersByRiskScoreRange(ctx contractapi.TransactionContextInterface, minScoreStr, maxScoreStr string) ([]*models.UserInfo, error) {
-	// 将字符串转换为整数
-	minScore, err := strconv.Atoi(minScoreStr)
+	// 将字符串转换为浮点数
+	minScore, err := strconv.ParseFloat(minScoreStr, 64)
 	if err != nil {
 		return nil, fmt.Errorf("最小风险评分格式无效: %v", err)
 	}
 	
-	maxScore, err := strconv.Atoi(maxScoreStr)
+	maxScore, err := strconv.ParseFloat(maxScoreStr, 64)
 	if err != nil {
 		return nil, fmt.Errorf("最大风险评分格式无效: %v", err)
 	}

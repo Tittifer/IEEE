@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"log"
 	"path"
-	"strconv"
 	"time"
 
 	"github.com/hyperledger/fabric-gateway/pkg/client"
@@ -37,18 +36,18 @@ type HoneypointClient struct {
 
 // 用户事件结构体，用于解析链码事件
 type UserEvent struct {
-	EventType string `json:"eventType"` // 事件类型
-	DID       string `json:"did"`       // 用户DID
-	Name      string `json:"name"`      // 用户名称
-	Timestamp int64  `json:"timestamp"` // 事件时间戳
-	RiskScore int    `json:"riskScore"` // 风险评分（可选）
+	EventType string  `json:"eventType"` // 事件类型
+	DID       string  `json:"did"`       // 用户DID
+	Name      string  `json:"name"`      // 用户名称
+	Timestamp int64   `json:"timestamp"` // 事件时间戳
+	RiskScore float64 `json:"riskScore"` // 风险评分（可选），修改为float64类型
 }
 
 // 合约名称常量
 const (
 	identityContract   = "IdentityContract"
-	configPath         = "config.json" // 修改为相对于执行目录的路径
-	riskScoreThreshold = 50            // 风险评分阈值
+	configPath         = "config.json"
+	riskScoreThreshold = 50.00 // 风险评分阈值，修改为浮点数
 )
 
 // NewHoneypointClient 创建新的蜜点后台客户端
@@ -314,7 +313,7 @@ func (c *HoneypointClient) listenForUserLoggedIn() {
 				}
 				log.Printf("用户 %s 已添加到数据库", userEvent.DID)
 			} else {
-				log.Printf("用户 %s 已登录，当前风险评分: %d", userEvent.DID, user.CurrentScore)
+				log.Printf("用户 %s 已登录，当前风险评分: %.2f", userEvent.DID, user.CurrentScore)
 			}
 
 			// 启动风险监控
@@ -395,7 +394,7 @@ func (c *HoneypointClient) listenForRiskScoreUpdated() {
 				continue
 			}
 
-			log.Printf("收到风险评分更新事件: DID=%s, 姓名=%s, 风险评分=%d", userEvent.DID, userEvent.Name, userEvent.RiskScore)
+			log.Printf("收到风险评分更新事件: DID=%s, 姓名=%s, 风险评分=%.2f", userEvent.DID, userEvent.Name, userEvent.RiskScore)
 
 			// 获取用户信息
 			user, err := c.dbManager.GetUserByDID(userEvent.DID)
@@ -415,7 +414,7 @@ func (c *HoneypointClient) listenForRiskScoreUpdated() {
 				continue
 			}
 
-			log.Printf("用户 %s 的风险评分已更新为 %d", userEvent.DID, userEvent.RiskScore)
+			log.Printf("用户 %s 的风险评分已更新为 %.2f", userEvent.DID, userEvent.RiskScore)
 		}
 	}
 }
@@ -447,7 +446,7 @@ func (c *HoneypointClient) startRiskMonitoring(did string) {
 
 		log.Printf("可用的风险行为类型:")
 		for i, rule := range rules {
-			log.Printf("%d. %s - %s (得分: %d)", i+1, rule.BehaviorType, rule.Description, rule.Score)
+			log.Printf("%d. %s - %s (得分: %.2f)", i+1, rule.BehaviorType, rule.Description, rule.Score)
 		}
 
 		log.Printf("请通过命令行输入风险行为类型来模拟用户风险行为")
@@ -462,19 +461,23 @@ func (c *HoneypointClient) ProcessRiskBehavior(did string, behaviorType string) 
 		return fmt.Errorf("风险评估失败: %w", err)
 	}
 
-	// 如果风险评分超过阈值，向链上报告
+	// 无论风险评分是否超过阈值，都立即向链上报告
+	log.Printf("用户 %s 的风险评分为 %.2f，立即向链上报告", did, newScore)
+
+	// 将浮点数转换为字符串，保留两位小数
+	scoreStr := fmt.Sprintf("%.2f", newScore)
+
+	// 向链上报告风险评分
+	_, err = c.contract.SubmitTransaction(identityContract+":UpdateRiskScore", did, scoreStr)
+	if err != nil {
+		return fmt.Errorf("向链上报告风险评分失败: %w", err)
+	}
+
+	log.Printf("已向链上报告用户 %s 的风险评分 %.2f", did, newScore)
+
+	// 检查风险评分是否超过阈值
 	if newScore >= riskScoreThreshold {
-		log.Printf("用户 %s 的风险评分 %d 超过阈值 %d，向链上报告", did, newScore, riskScoreThreshold)
-
-		// 向链上报告风险评分
-		_, err := c.contract.SubmitTransaction(identityContract+":UpdateRiskScore", did, strconv.Itoa(newScore))
-		if err != nil {
-			return fmt.Errorf("向链上报告风险评分失败: %w", err)
-		}
-
-		log.Printf("已向链上报告用户 %s 的风险评分", did)
-	} else {
-		log.Printf("用户 %s 的风险评分 %d 未超过阈值 %d", did, newScore, riskScoreThreshold)
+		log.Printf("用户 %s 的风险评分 %.2f 超过阈值 %.2f，可能会被强制退出", did, newScore, riskScoreThreshold)
 	}
 
 	return nil

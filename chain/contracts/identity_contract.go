@@ -334,8 +334,8 @@ func (c *IdentityContract) UpdateRiskScore(ctx contractapi.TransactionContextInt
 		return fmt.Errorf("无效的DID格式: %s", did)
 	}
 	
-	// 解析风险评分
-	riskScore, err := strconv.Atoi(riskScoreStr)
+	// 解析风险评分，使用ParseFloat代替Atoi，支持浮点数
+	riskScore, err := strconv.ParseFloat(riskScoreStr, 64)
 	if err != nil {
 		return fmt.Errorf("无效的风险评分格式: %s", riskScoreStr)
 	}

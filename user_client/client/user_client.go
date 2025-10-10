@@ -27,18 +27,18 @@ type UserClient struct {
 
 // 用户事件结构体，用于解析链码事件
 type UserEvent struct {
-	EventType string `json:"eventType"` // 事件类型
-	DID       string `json:"did"`       // 用户DID
-	Name      string `json:"name"`      // 用户名称
-	Timestamp int64  `json:"timestamp"` // 事件时间戳
-	RiskScore int    `json:"riskScore"` // 风险评分（可选）
+	EventType string  `json:"eventType"` // 事件类型
+	DID       string  `json:"did"`       // 用户DID
+	Name      string  `json:"name"`      // 用户名称
+	Timestamp int64   `json:"timestamp"` // 事件时间戳
+	RiskScore float64 `json:"riskScore"` // 风险评分（可选），修改为float64类型
 }
 
 // 合约名称常量
 const (
 	identityContract = "IdentityContract"
 	configPath       = "../config.json"
-	riskScoreThreshold = 50 // 风险评分阈值
+	riskScoreThreshold = 50.00 // 风险评分阈值，修改为浮点数
 )
 
 // NewUserClient 创建新的用户客户端
@@ -177,12 +177,12 @@ func (c *UserClient) UserLogin(did, name string) (string, error) {
 	if err == nil && len(userJSON) > 0 {
 		// 解析用户信息
 		var user struct {
-			RiskScore int `json:"riskScore"`
+			RiskScore float64 `json:"riskScore"` // 修改为float64类型
 		}
 		if err := json.Unmarshal(userJSON, &user); err == nil {
 			// 检查风险评分是否超过阈值
 			if user.RiskScore >= riskScoreThreshold {
-				return "", fmt.Errorf("登录失败：用户风险评分过高 (%d)，超过阈值 (%d)", user.RiskScore, riskScoreThreshold)
+				return "", fmt.Errorf("登录失败：用户风险评分过高 (%.2f)，超过阈值 (%.2f)", user.RiskScore, riskScoreThreshold)
 			}
 		}
 	}
@@ -295,8 +295,8 @@ func (c *UserClient) monitorRiskScore(did string) {
 		
 		// 解析用户信息
 		var user struct {
-			RiskScore int    `json:"riskScore"`
-			Name      string `json:"name"`
+			RiskScore float64 `json:"riskScore"` // 修改为float64类型
+			Name      string  `json:"name"`
 		}
 		if err := json.Unmarshal(userJSON, &user); err != nil {
 			log.Printf("解析用户 %s 信息失败: %v", did, err)
@@ -305,7 +305,7 @@ func (c *UserClient) monitorRiskScore(did string) {
 		
 		// 检查风险评分是否超过阈值
 		if user.RiskScore >= riskScoreThreshold {
-			log.Printf("用户 %s 风险评分 %d 超过阈值 %d，强制登出", did, user.RiskScore, riskScoreThreshold)
+			log.Printf("用户 %s 风险评分 %.2f 超过阈值 %.2f，强制登出", did, user.RiskScore, riskScoreThreshold)
 			
 			// 强制登出用户
 			_, err := c.UserLogout(did)
@@ -313,7 +313,7 @@ func (c *UserClient) monitorRiskScore(did string) {
 				log.Printf("强制登出用户 %s 失败: %v", did, err)
 			} else {
 				log.Printf("已强制登出用户 %s", did)
-				fmt.Printf("\n警告: 由于风险评分过高 (%d)，系统已强制登出用户 %s\n", user.RiskScore, user.Name)
+				fmt.Printf("\n警告: 由于风险评分过高 (%.2f)，系统已强制登出用户 %s\n", user.RiskScore, user.Name)
 			}
 			
 			return
