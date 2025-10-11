@@ -112,18 +112,15 @@ func (r *RiskAssessor) calculateRiskScore(userID int, currentBehaviorScore float
 	// 应用降温曲线计算上次得分的衰减值
 	// S_{t-1}^{'}=max(0,S_{t-1}-\frac{\delta*\Delta t}{1+\alpha*S_{t-1}})
 	var cooledPreviousScore float64 = 0.00
-	if len(behaviors) > 0 {
-		// 获取上次风险行为的时间
-		lastBehaviorTime := behaviors[0].Timestamp
-		// 计算时间差（秒）
-		deltaT := now.Sub(lastBehaviorTime).Seconds()
-		// 应用降温曲线
-		coolingFactor := (r.delta * deltaT) / (1 + r.alpha * user.CurrentScore)
-		cooledPreviousScore = math.Max(0.00, user.CurrentScore - coolingFactor)
-		log.Printf("用户当前分数 %.2f 经过 %.2f 秒的降温后变为 %.2f", user.CurrentScore, deltaT, cooledPreviousScore)
-	} else {
-		cooledPreviousScore = user.CurrentScore
-	}
+	
+	// 使用用户表中的last_update字段计算时间差
+	// 计算时间差（秒）
+	deltaT := now.Sub(user.LastUpdate).Seconds()
+	
+	// 应用降温曲线
+	coolingFactor := (r.delta * deltaT) / (1 + r.alpha * user.CurrentScore)
+	cooledPreviousScore = math.Max(0.00, user.CurrentScore - coolingFactor)
+	log.Printf("用户当前分数 %.2f 经过 %.2f 秒的降温后变为 %.2f", user.CurrentScore, deltaT, cooledPreviousScore)
 
 	// 计算得分归一化
 	// 当前我们简化处理，直接使用当前行为得分
