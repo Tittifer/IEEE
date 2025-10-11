@@ -115,6 +115,19 @@ func handleCommandLineArgs() {
 			log.Fatalf("获取DID失败: %v", err)
 		}
 		fmt.Println("DID:", result)
+		
+	case "reset-risk":
+		if len(os.Args) != 3 {
+			fmt.Println("用法: go run main.go reset-risk <DID>")
+			return
+		}
+		did := os.Args[2]
+
+		result, err := userClient.ResetUserRiskScore(did)
+		if err != nil {
+			log.Fatalf("重置用户风险评分失败: %v", err)
+		}
+		fmt.Println(result)
 
 	default:
 		printUsage()
@@ -139,6 +152,8 @@ func runInteractiveMode() {
 		case "5":
 			getDID()
 		case "6":
+			resetRiskScore()
+		case "7":
 			fmt.Println("感谢使用，再见！")
 			return
 		default:
@@ -158,7 +173,8 @@ func showMainMenu() {
 	fmt.Println("3. 用户登出")
 	fmt.Println("4. 查询用户信息")
 	fmt.Println("5. 获取DID")
-	fmt.Println("6. 退出")
+	fmt.Println("6. 重置风险评分")
+	fmt.Println("7. 退出")
 	fmt.Println("============================")
 }
 
@@ -241,6 +257,19 @@ func getUserInput(prompt string) string {
 	return strings.TrimSpace(scanner.Text())
 }
 
+// 重置风险评分
+func resetRiskScore() {
+	fmt.Println("\n===== 重置风险评分 =====")
+	did := getUserInput("请输入DID")
+
+	result, err := userClient.ResetUserRiskScore(did)
+	if err != nil {
+		fmt.Printf("重置风险评分失败: %v\n", err)
+		return
+	}
+	fmt.Println(result)
+}
+
 // 打印使用说明
 func printUsage() {
 	fmt.Println("用户客户端使用说明:")
@@ -249,5 +278,6 @@ func printUsage() {
 	fmt.Println("  用户登出: go run main.go logout <DID>")
 	fmt.Println("  获取用户信息: go run main.go get-user <DID>")
 	fmt.Println("  获取DID: go run main.go get-did <姓名> <身份证号> <手机号> <车辆ID>")
+	fmt.Println("  重置风险评分: go run main.go reset-risk <DID>")
 	fmt.Println("  或者直接运行 go run main.go 进入交互式界面")
 }

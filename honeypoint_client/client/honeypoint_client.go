@@ -200,6 +200,9 @@ func (c *HoneypointClient) StartEventListener() error {
 
 	// 监听风险评分更新事件
 	go c.listenForRiskScoreUpdated()
+	
+	// 监听风险评分重置事件
+	go c.listenForRiskScoreReset()
 
 	log.Println("事件监听器已启动")
 	return nil
@@ -490,6 +493,62 @@ func loadCertificate(filename string) (*x509.Certificate, error) {
 		return nil, fmt.Errorf("读取证书文件失败: %w", err)
 	}
 	return identity.CertificateFromPEM(certificatePEM)
+}
+
+// listenForRiskScoreReset 监听风险评分重置事件
+func (c *HoneypointClient) listenForRiskScoreReset() {
+	log.Println("开始监听风险评分重置事件...")
+
+	// 使用新的API监听链码事件
+	events, err := c.network.ChaincodeEvents(c.ctx, c.config.ChaincodeName)
+	if err != nil {
+		log.Printf("注册风险评分重置事件监听失败: %v", err)
+		return
+	}
+
+	for {
+		select {
+		case <-c.stopChan:
+			return
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+
+			// 只处理RiskScoreReset事件
+			if event.EventName != "RiskScoreReset" {
+				continue
+			}
+
+			// 解析事件数据
+			var userEvent UserEvent
+			if err := json.Unmarshal(event.Payload, &userEvent); err != nil {
+				log.Printf("解析风险评分重置事件数据失败: %v", err)
+				continue
+			}
+
+			log.Printf("收到风险评分重置事件: DID=%s, 姓名=%s", userEvent.DID, userEvent.Name)
+
+			// 清除用户风险数据
+			if err := c.ClearUserRiskData(userEvent.DID); err != nil {
+				log.Printf("清除用户风险数据失败: %v", err)
+				continue
+			}
+
+			log.Printf("用户 %s 的风险数据已重置", userEvent.DID)
+		}
+	}
+}
+
+// ClearUserRiskData 清除用户风险数据
+func (c *HoneypointClient) ClearUserRiskData(did string) error {
+	// 调用数据库管理器清除用户风险数据
+	if err := c.dbManager.ClearUserRiskData(did); err != nil {
+		return fmt.Errorf("清除用户风险数据失败: %w", err)
+	}
+	
+	log.Printf("已清除用户 %s 的风险数据", did)
+	return nil
 }
 
 // 辅助函数：加载私钥

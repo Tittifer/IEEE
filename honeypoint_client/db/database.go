@@ -473,3 +473,50 @@ func (m *DBManager) GetAllRiskRules() ([]RiskRule, error) {
 
 	return rules, nil
 }
+
+// ClearUserRiskData 清除用户风险数据
+func (m *DBManager) ClearUserRiskData(did string) error {
+	// 首先获取用户信息
+	user, err := m.GetUserByDID(did)
+	if err != nil {
+		return fmt.Errorf("获取用户信息失败: %w", err)
+	}
+	
+	if user == nil {
+		return fmt.Errorf("用户 %s 不存在", did)
+	}
+	
+	// 1. 重置用户风险评分为0
+	_, err = m.db.Exec(
+		"UPDATE users SET current_score = 0.00, last_update = CURRENT_TIMESTAMP WHERE id = ?",
+		user.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("重置用户风险评分失败: %w", err)
+	}
+	
+	// 2. 清空用户行为表
+	tableName := getSafeTableName(did)
+	
+	// 检查表是否存在
+	var tableExists bool
+	query := fmt.Sprintf("SHOW TABLES LIKE '%s'", tableName)
+	err = m.db.QueryRow(query).Scan(&tableName)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("检查表是否存在失败: %w", err)
+	}
+	tableExists = (err != sql.ErrNoRows)
+	
+	if tableExists {
+		// 清空表数据
+		truncateSQL := fmt.Sprintf("TRUNCATE TABLE %s", tableName)
+		_, err = m.db.Exec(truncateSQL)
+		if err != nil {
+			return fmt.Errorf("清空用户行为表失败: %w", err)
+		}
+		log.Printf("已清空用户 %s 的行为表", did)
+	}
+	
+	log.Printf("已成功清除用户 %s 的风险数据", did)
+	return nil
+}

@@ -273,6 +273,34 @@ func (c *UserClient) GetDIDByInfo(name, idNumber, phoneNumber, vehicleID string)
 	return string(result), nil
 }
 
+// ResetUserRiskScore 重置用户风险评分
+func (c *UserClient) ResetUserRiskScore(did string) (string, error) {
+	log.Printf("重置用户风险评分: %s", did)
+	
+	// 参数验证
+	if did == "" {
+		return "", fmt.Errorf("DID不能为空")
+	}
+	
+	// 检查用户是否存在
+	userJSON, err := c.contract.EvaluateTransaction(identityContract+":GetUser", did)
+	if err != nil {
+		return "", fmt.Errorf("获取用户信息失败: %w", err)
+	}
+	if len(userJSON) == 0 {
+		return "", fmt.Errorf("用户DID %s 不存在", did)
+	}
+	
+	// 调用链码重置用户风险评分
+	_, err = c.contract.SubmitTransaction(identityContract+":ResetRiskScore", did)
+	if err != nil {
+		return "", fmt.Errorf("提交交易失败: %w", err)
+	}
+	
+	log.Printf("用户 %s 的风险评分已重置为0", did)
+	return "用户风险评分已重置为0", nil
+}
+
 // monitorRiskScore 监控用户风险评分，如果超过阈值则强制登出
 func (c *UserClient) monitorRiskScore(did string) {
 	// 每10秒检查一次风险评分

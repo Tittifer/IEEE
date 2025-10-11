@@ -25,6 +25,7 @@ const (
 	EventTypeLogin      = "login"       // 用户登录事件
 	EventTypeLogout     = "logout"      // 用户登出事件
 	EventTypeRiskUpdate = "risk_update" // 风险评分更新事件
+	EventTypeRiskReset  = "risk_reset"  // 风险评分重置事件
 )
 
 // 用户状态常量

@@ -407,6 +407,75 @@ func (c *IdentityContract) UpdateRiskScore(ctx contractapi.TransactionContextInt
 	return nil
 }
 
+// ResetRiskScore 重置用户风险评分为0
+func (c *IdentityContract) ResetRiskScore(ctx contractapi.TransactionContextInterface, did string) error {
+	// 验证DID格式
+	if !utils.ValidateDID(did) {
+		return fmt.Errorf("无效的DID格式: %s", did)
+	}
+	
+	// 获取用户信息
+	userInfoJSON, err := ctx.GetStub().GetState(did)
+	if err != nil {
+		return fmt.Errorf("读取用户信息时出错: %v", err)
+	}
+	if userInfoJSON == nil {
+		return fmt.Errorf("用户DID %s 不存在", did)
+	}
+	
+	// 反序列化用户信息
+	var userInfo models.UserInfo
+	err = json.Unmarshal(userInfoJSON, &userInfo)
+	if err != nil {
+		return fmt.Errorf("用户信息反序列化失败: %v", err)
+	}
+	
+	// 重置风险评分为0
+	userInfo.RiskScore = 0.00
+	
+	// 使用交易时间戳更新最后更新时间
+	timestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return fmt.Errorf("获取交易时间戳失败: %v", err)
+	}
+	txTime := time.Unix(timestamp.Seconds, int64(timestamp.Nanos))
+	userInfo.LastUpdatedAt = txTime.Format(time.RFC3339)
+	
+	// 将更新后的用户信息保存到账本
+	userInfoJSON, err = json.Marshal(userInfo)
+	if err != nil {
+		return fmt.Errorf("用户信息序列化失败: %v", err)
+	}
+	
+	err = ctx.GetStub().PutState(did, userInfoJSON)
+	if err != nil {
+		return fmt.Errorf("更新用户信息时出错: %v", err)
+	}
+	
+	// 创建风险评分重置事件
+	resetEvent := models.UserEvent{
+		EventType: models.EventTypeRiskReset,
+		DID:       did,
+		Name:      userInfo.Name,
+		Timestamp: txTime.Unix(),
+		RiskScore: 0.00,
+	}
+
+	// 序列化事件数据
+	eventJSON, err := json.Marshal(resetEvent)
+	if err != nil {
+		return fmt.Errorf("事件数据序列化失败: %v", err)
+	}
+
+	// 发送风险评分重置事件
+	err = ctx.GetStub().SetEvent("RiskScoreReset", eventJSON)
+	if err != nil {
+		return fmt.Errorf("发送风险评分重置事件失败: %v", err)
+	}
+	
+	return nil
+}
+
 // GetAllUsers 获取所有用户
 func (c *IdentityContract) GetAllUsers(ctx contractapi.TransactionContextInterface) (string, error) {
 	// 获取所有用户的迭代器
