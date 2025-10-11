@@ -47,23 +47,21 @@ hyperledger-fabric/chaincode/IEEE/
    - id：用户ID
    - did：用户分布式标识符
    - name：用户名称
-   - current_score：当前风险评分
+   - current_score：当前风险评分（小数点后两位）
    - last_update：最后更新时间
    - created_at：创建时间
 
-2. **risk_behaviors表**：存储用户风险行为记录
+2. **用户行为表（动态创建）**：为每个用户创建单独的行为表，表名格式为`user_behaviors_{did}`
    - id：记录ID
-   - user_id：用户ID
    - behavior_type：行为类型
-   - score：行为得分
+   - score：行为得分（小数点后两位）
    - timestamp：行为时间
 
 3. **risk_rules表**：存储风险评分规则
    - id：规则ID
    - behavior_type：行为类型
-   - score：行为得分
+   - score：行为得分（小数点后两位）
    - description：规则描述
-   - created_at：创建时间
 
 ## 风险评分算法
 
@@ -71,9 +69,13 @@ hyperledger-fabric/chaincode/IEEE/
 
 1. **分数更新**：
    ```
-   St = min(Smax, Score * λ)
+   St = min(Smax, (Score + St-1') * λ)
    ```
-   其中，St为本次计算分数，Smax为最高得分
+   其中：
+   - St为本次计算分数
+   - Smax为最高得分
+   - Score为当前行为得分
+   - St-1'为经过降温曲线处理的上次分数
 
 2. **历史风险行为影响因子**：
    ```
@@ -86,10 +88,15 @@ hyperledger-fabric/chaincode/IEEE/
    - Sp,j：第j次风险行为的分数
    - tj：第j次风险行为发生时间
 
-3. **冷却曲线**：随着时间推移，风险评分会逐渐降低
+3. **降温曲线**：随着时间推移，风险评分会逐渐降低
    ```
-   decayedScore = score - (delta * deltaT) / (1 + alpha * score)
+   St-1' = max(0, St-1 - (δ * Δt) / (1 + α * St-1))
    ```
+   其中：
+   - St-1：上次计算得分
+   - δ：影响低分时降温速度参数
+   - Δt：上次风险行为和本次风险行为的时间间隔
+   - α：影响高分时降温速度参数
 
 ## 代码执行流程
 
@@ -133,12 +140,12 @@ graph TD
     C -->|退出| H[退出程序]
     
     E --> I[检查风险评分]
-    I -->|风险评分>=50| J[拒绝登录]
-    I -->|风险评分<50| K[允许登录]
+    I -->|风险评分>=50.00| J[拒绝登录]
+    I -->|风险评分<50.00| K[允许登录]
     K --> L[启动风险评分监控]
     L --> M{定期检查风险评分}
-    M -->|风险评分>=50| N[强制登出]
-    M -->|风险评分<50| O[继续监控]
+    M -->|风险评分>=50.00| N[强制登出]
+    M -->|风险评分<50.00| O[继续监控]
     O --> M
     
     D --> P[返回主菜单]
@@ -152,10 +159,10 @@ graph TD
 
 ```mermaid
 graph TD
-    A[接收风险行为] --> B[记录风险行为到数据库]
+    A[接收风险行为] --> B[记录风险行为到用户行为表]
     B --> C[获取用户历史风险行为]
     C --> D[计算历史影响因子λ]
-    D --> E[应用冷却曲线]
+    D --> E[应用降温曲线]
     E --> F[计算最终风险评分]
     F --> G[更新用户风险评分]
     G --> H[向区块链报告风险评分]
@@ -198,7 +205,11 @@ graph TD
   "ChaincodeName": "chaincc",
   "PeerEndpoint": "localhost:8051",
   "GatewayPeer": "peer0.org1.chain.com",
-  "MySQLDataSourceName": "root:1@tcp(127.0.0.1:3306)/ieee_honeypoint?parseTime=true"
+  "DBHost": "127.0.0.1",
+  "DBPort": 3306,
+  "DBUser": "root",
+  "DBPassword": "1",
+  "DBName": "ieee_honeypoint"
 }
 ```
 
@@ -214,32 +225,24 @@ CREATE TABLE users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   did VARCHAR(255) UNIQUE NOT NULL,
   name VARCHAR(255) NOT NULL,
-  current_score INT DEFAULT 0,
+  current_score DECIMAL(10,2) DEFAULT 0.00,
   last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE risk_behaviors (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  user_id INT NOT NULL,
-  behavior_type VARCHAR(50) NOT NULL,
-  score INT NOT NULL,
-  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 CREATE TABLE risk_rules (
   id INT AUTO_INCREMENT PRIMARY KEY,
   behavior_type VARCHAR(50) UNIQUE NOT NULL,
-  score INT NOT NULL,
-  description VARCHAR(255),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  score DECIMAL(10,2) NOT NULL,
+  description VARCHAR(255)
 );
 
--- 插入默认风险规则
+-- 插入风险规则
 INSERT INTO risk_rules (behavior_type, score, description) VALUES
-('A', 5, '低风险行为'),
-('B', 10, '高风险行为');
+('edge_honeypot', 2.00, '访问非关键蜜点'),
+('business_honeypot', 6.00, '访问业务处理类蜜点'),
+('core_honeypot', 9.00, '访问模拟核心控制系统的蜜点');
+-- 更多规则...
 ```
 
 ### 运行后台客户端
@@ -261,17 +264,17 @@ go run main.go
 在后台客户端运行时，可以输入风险行为，格式为：`DID:行为类型`
 
 例如：
-- `did:example:123:A` - 用户DID为did:example:123，行为类型为A
-- `did:example:456:B` - 用户DID为did:example:456，行为类型为B
+- `did:example:123:edge_honeypot` - 用户DID为did:example:123，行为类型为访问非关键蜜点
+- `did:example:456:core_honeypot` - 用户DID为did:example:456，行为类型为访问核心蜜点
 
 ## 系统交互流程
 
 1. 用户通过用户客户端注册账户
-2. 后台客户端监听到注册事件，初始化用户风险评分为0
+2. 后台客户端监听到注册事件，初始化用户风险评分为0.00
 3. 用户通过用户客户端登录
-4. 后台客户端监听到登录事件，记录用户登录状态
+4. 后台客户端监听到登录事件，为用户创建专属行为表并记录用户登录状态
 5. 后台客户端接收风险行为输入，计算用户风险评分
 6. 后台客户端向区块链报告最新风险评分
-7. 用户客户端监控用户风险评分，当风险评分超过阈值时强制登出
+7. 用户客户端监控用户风险评分，当风险评分超过阈值(50.00)时强制登出
 8. 用户通过用户客户端登出
 9. 后台客户端监听到登出事件，记录用户登出状态

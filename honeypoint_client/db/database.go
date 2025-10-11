@@ -323,6 +323,25 @@ func (m *DBManager) GetUserByDID(did string) (*User, error) {
 	return &user, nil
 }
 
+// GetUserByID 根据ID获取用户
+func (m *DBManager) GetUserByID(userID int) (*User, error) {
+	var user User
+	err := m.db.QueryRow(
+		"SELECT id, did, name, current_score, last_update, created_at FROM users WHERE id = ?",
+		userID,
+	).Scan(&user.ID, &user.DID, &user.Name, &user.CurrentScore, &user.LastUpdate, &user.CreatedAt)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("获取用户失败: %w", err)
+	}
+	
+	return &user, nil
+}
+
 // UpdateUserRiskScore 更新用户风险评分
 func (m *DBManager) UpdateUserRiskScore(userID int, newScore float64) error { // 修改为float64类型
 	_, err := m.db.Exec(

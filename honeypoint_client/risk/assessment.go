@@ -16,6 +16,8 @@ type RiskAssessor struct {
 	maxScore       float64 // 最高得分，修改为float64类型
 	decayRate      float64 // 衰减速率系数 beta
 	normalizationT float64 // 风险分数归一化基数 T
+	delta          float64 // 影响低分时降温速度参数
+	alpha          float64 // 影响高分时降温速度参数
 }
 
 // NewRiskAssessor 创建新的风险评估器
@@ -25,6 +27,8 @@ func NewRiskAssessor(dbManager *db.DBManager) *RiskAssessor {
 		maxScore:       100.00, // 修改为浮点数
 		decayRate:      0.01,   // 衰减速率系数，可调整
 		normalizationT: 100.00, // 归一化基数，可调整
+		delta:          0.05,   // 影响低分时降温速度参数，可调整
+		alpha:          0.02,   // 影响高分时降温速度参数，可调整
 	}
 }
 
@@ -70,6 +74,15 @@ func (r *RiskAssessor) AssessRisk(did string, behaviorType string) (float64, err
 
 // calculateRiskScore 计算风险评分
 func (r *RiskAssessor) calculateRiskScore(userID int, currentBehaviorScore float64) (float64, error) { // 参数和返回值修改为float64类型
+	// 获取用户信息，以获取当前分数
+	user, err := r.dbManager.GetUserByID(userID)
+	if err != nil {
+		return 0.00, fmt.Errorf("获取用户信息失败: %w", err)
+	}
+	if user == nil {
+		return 0.00, fmt.Errorf("用户不存在: ID=%d", userID)
+	}
+
 	// 获取用户历史风险行为
 	behaviors, err := r.dbManager.GetUserRiskBehaviors(userID, 50) // 获取最近50条记录
 	if err != nil {
@@ -96,12 +109,28 @@ func (r *RiskAssessor) calculateRiskScore(userID int, currentBehaviorScore float
 	// 计算 lambda = 1 + historyImpact
 	lambda := 1.0 + historyImpact
 
+	// 应用降温曲线计算上次得分的衰减值
+	// S_{t-1}^{'}=max(0,S_{t-1}-\frac{\delta*\Delta t}{1+\alpha*S_{t-1}})
+	var cooledPreviousScore float64 = 0.00
+	if len(behaviors) > 0 {
+		// 获取上次风险行为的时间
+		lastBehaviorTime := behaviors[0].Timestamp
+		// 计算时间差（秒）
+		deltaT := now.Sub(lastBehaviorTime).Seconds()
+		// 应用降温曲线
+		coolingFactor := (r.delta * deltaT) / (1 + r.alpha * user.CurrentScore)
+		cooledPreviousScore = math.Max(0.00, user.CurrentScore - coolingFactor)
+		log.Printf("用户当前分数 %.2f 经过 %.2f 秒的降温后变为 %.2f", user.CurrentScore, deltaT, cooledPreviousScore)
+	} else {
+		cooledPreviousScore = user.CurrentScore
+	}
+
 	// 计算得分归一化
 	// 当前我们简化处理，直接使用当前行为得分
 	normalizedScore := currentBehaviorScore
 
-	// 应用分数更新公式: S_t = min(S_max, Score * lambda)
-	newScore := math.Min(r.maxScore, normalizedScore*lambda)
+	// 应用分数更新公式: S_t = min(S_max, (Score + S_{t-1}^{'}) * lambda)
+	newScore := math.Min(r.maxScore, (normalizedScore + cooledPreviousScore) * lambda)
 
 	// 保留两位小数
 	newScore = math.Round(newScore*100) / 100
