@@ -3,60 +3,52 @@ package utils
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"regexp"
 	"strings"
 )
 
-// GenerateDID 根据用户信息生成分布式身份标识符
-func GenerateDID(name, idNumber, phoneNumber, vehicleID string) string {
-	// 将用户信息组合起来
-	combined := name + idNumber + phoneNumber + vehicleID
+// GenerateDID 根据设备信息生成DID
+func GenerateDID(name, model, vendor, deviceID string) string {
+	// 合并设备信息
+	info := fmt.Sprintf("%s:%s:%s:%s", name, model, vendor, deviceID)
 	
-	// 计算SHA-256哈希
-	hash := sha256.Sum256([]byte(combined))
+	// 计算SHA256哈希
+	hash := sha256.Sum256([]byte(info))
 	hashStr := hex.EncodeToString(hash[:])
 	
 	// 生成DID
-	did := "did:example:" + hashStr[:16]
+	did := fmt.Sprintf("did:ieee:device:%s", hashStr[:16])
 	
 	return did
 }
 
-// GenerateInfoHash 生成用户信息哈希值
-func GenerateInfoHash(name, idNumber, phoneNumber, vehicleID string) string {
-	// 将用户信息组合起来
-	combined := name + idNumber + phoneNumber + vehicleID
-	
-	// 计算SHA-256哈希
-	hash := sha256.Sum256([]byte(combined))
-	hashStr := hex.EncodeToString(hash[:])
-	
-	return hashStr
-}
-
-// ValidateDID 验证DID格式是否正确
+// ValidateDID 验证DID格式
 func ValidateDID(did string) bool {
-	// 检查DID前缀
-	if !strings.HasPrefix(did, "did:example:") {
-		return false
-	}
-	
-	// 检查DID长度
-	parts := strings.Split(did, ":")
-	if len(parts) != 3 {
-		return false
-	}
-	
-	// 检查标识符部分
-	identifier := parts[2]
-	if len(identifier) < 16 {
-		return false
-	}
-	
-	return true
+	// DID格式: did:ieee:device:<16位十六进制字符>
+	pattern := `^did:ieee:device:[0-9a-f]{16}$`
+	match, _ := regexp.MatchString(pattern, did)
+	return match
 }
 
-// CalculateInitialRiskScore 计算用户初始风险值
-// 目前简单返回固定值，未来可以基于用户信息进行计算
+// CalculateInitialRiskScore 计算初始风险评分
 func CalculateInitialRiskScore() float64 {
-	return 0.00 // 初始风险值为0，修改为浮点数
+	return 0.0 // 设备初始风险评分为0
+}
+
+// ExtractDIDFromSubject 从证书主题中提取DID
+func ExtractDIDFromSubject(subject string) (string, error) {
+	// 假设证书主题格式为 "CN=<did>,OU=..."
+	if strings.HasPrefix(subject, "CN=") {
+		parts := strings.Split(subject, ",")
+		if len(parts) > 0 {
+			cn := parts[0]
+			did := strings.TrimPrefix(cn, "CN=")
+			if ValidateDID(did) {
+				return did, nil
+			}
+		}
+	}
+	
+	return "", fmt.Errorf("无法从证书主题中提取有效的DID: %s", subject)
 }

@@ -38,7 +38,7 @@ docker exec cli_chain peer chaincode invoke \
   --waitForEvent
 ```
 
-### 2. 注册新用户
+### 2. 注册新设备
 
 ```bash
 docker exec cli_chain peer chaincode invoke \
@@ -49,39 +49,50 @@ docker exec cli_chain peer chaincode invoke \
   -n chaincc \
   --peerAddresses peer0.org1.chain.com:8051 \
   --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.chain.com/peers/peer0.org1.chain.com/tls/ca.crt \
-  -c '{"function":"RegisterUser","Args":["张三", "110101199001011234", "13800138000", "京A12345"]}' \
+  -c '{"function":"RegisterDevice","Args":["智能电表", "XM100", "国家电网", "SN12345678"]}' \
   --waitForEvent
 ```
 
-### 3. 获取用户DID
+### 3. 获取设备DID
 
 ```bash
 docker exec cli_chain peer chaincode query \
   -C mainchannel \
   -n chaincc \
-  -c "{\"function\":\"GetDIDByInfo\",\"Args\":[\"张三\", \"110101199001011234\", \"13800138000\", \"京A12345\"]}"
+  -c "{\"function\":\"GetDIDByInfo\",\"Args\":[\"智能电表\", \"XM100\", \"国家电网\", \"SN12345678\"]}"
 ```
 
-### 4. 查询用户信息
+### 4. 查询设备信息
 
 ```bash
 # 先获取DID
 DID=$(docker exec cli_chain peer chaincode query \
   -C mainchannel \
   -n chaincc \
-  -c "{\"function\":\"GetDIDByInfo\",\"Args\":[\"张三\", \"110101199001011234\", \"13800138000\", \"京A12345\"]}" 2>/dev/null)
+  -c "{\"function\":\"GetDIDByInfo\",\"Args\":[\"智能电表\", \"XM100\", \"国家电网\", \"SN12345678\"]}" 2>/dev/null)
 
-# 使用DID查询用户信息
+# 使用DID查询设备信息
 docker exec cli_chain peer chaincode query \
   -C mainchannel \
   -n chaincc \
-  -c "{\"function\":\"GetUser\",\"Args\":[\"$DID\"]}"
+  -c "{\"function\":\"GetDevice\",\"Args\":[\"$DID\"]}"
 ```
 
-### 5. 用户登录
+### 5. 验证设备身份
 
 ```bash
-# 使用DID和用户名进行登录
+docker exec cli_chain peer chaincode query \
+  -C mainchannel \
+  -n chaincc \
+  -c "{\"function\":\"VerifyDeviceIdentity\",\"Args\":[\"$DID\", \"智能电表\", \"XM100\"]}"
+```
+
+### 6. 更新设备风险评分
+
+```bash
+# 准备攻击画像JSON数据
+ATTACK_PROFILE='[\"Recon\", \"InitialAccess\"]'
+
 docker exec cli_chain peer chaincode invoke \
   -o orderer.chain.com:8050 \
   --tls \
@@ -90,36 +101,11 @@ docker exec cli_chain peer chaincode invoke \
   -n chaincc \
   --peerAddresses peer0.org1.chain.com:8051 \
   --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.chain.com/peers/peer0.org1.chain.com/tls/ca.crt \
-  -c "{\"function\":\"UserLogin\",\"Args\":[\"$DID\", \"张三\"]}" \
+  -c "{\"function\":\"UpdateDeviceRiskScore\",\"Args\":[\"$DID\", \"30.5\", \"1.2\", \"$ATTACK_PROFILE\"]}" \
   --waitForEvent
 ```
 
-### 6. 用户登出
-
-```bash
-# 使用DID进行登出
-docker exec cli_chain peer chaincode invoke \
-  -o orderer.chain.com:8050 \
-  --tls \
-  --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/chain.com/orderers/orderer.chain.com/msp/tlscacerts/tlsca.chain.com-cert.pem \
-  -C mainchannel \
-  -n chaincc \
-  --peerAddresses peer0.org1.chain.com:8051 \
-  --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.chain.com/peers/peer0.org1.chain.com/tls/ca.crt \
-  -c "{\"function\":\"UserLogout\",\"Args\":[\"$DID\"]}" \
-  --waitForEvent
-```
-
-### 7. 验证用户身份
-
-```bash
-docker exec cli_chain peer chaincode query \
-  -C mainchannel \
-  -n chaincc \
-  -c "{\"function\":\"VerifyIdentity\",\"Args\":[\"$DID\", \"张三\"]}"
-```
-
-### 8. 更新用户风险评分
+### 7. 重置设备风险评分
 
 ```bash
 docker exec cli_chain peer chaincode invoke \
@@ -130,17 +116,26 @@ docker exec cli_chain peer chaincode invoke \
   -n chaincc \
   --peerAddresses peer0.org1.chain.com:8051 \
   --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.chain.com/peers/peer0.org1.chain.com/tls/ca.crt \
-  -c "{\"function\":\"UpdateRiskScore\",\"Args\":[\"$DID\", \"30\"]}" \
+  -c "{\"function\":\"ResetDeviceRiskScore\",\"Args\":[\"$DID\"]}" \
   --waitForEvent
 ```
 
-### 9. 获取所有用户
+### 8. 获取所有设备信息
 
 ```bash
 docker exec cli_chain peer chaincode query \
   -C mainchannel \
   -n chaincc \
-  -c "{\"function\":\"GetAllUsers\",\"Args\":[]}"
+  -c "{\"function\":\"GetAllDevices\",\"Args\":[]}"
+```
+
+### 9. 获取设备风险响应策略
+
+```bash
+docker exec cli_chain peer chaincode query \
+  -C mainchannel \
+  -n chaincc \
+  -c "{\"function\":\"GetDeviceRiskResponse\",\"Args\":[\"$DID\"]}"
 ```
 
 ## 使用chain_cli.sh简化命令
@@ -151,16 +146,19 @@ chain_docker目录下的chain_cli.sh脚本可以简化链码调用：
 cd ../chain_docker
 
 # 查询命令
-./chain_cli.sh query GetDIDByInfo 张三 110101199001011234 13800138000 京A12345
+./chain_cli.sh query GetDIDByInfo 智能电表 XM100 国家电网 SN12345678
 
 # 调用命令
-./chain_cli.sh invoke RegisterUser 李四 110101199001012345 13900139000 京B12345
+./chain_cli.sh invoke RegisterDevice 智能插座 SP200 国家电网 SN87654321
 
-# 用户登录
-./chain_cli.sh invoke UserLogin $DID 张三
+# 获取设备信息
+./chain_cli.sh query GetDevice $DID
 
-# 用户登出
-./chain_cli.sh invoke UserLogout $DID
+# 获取所有设备
+./chain_cli.sh query GetAllDevices
+
+# 重置设备风险评分
+./chain_cli.sh invoke ResetDeviceRiskScore $DID
 ```
 
 注意：如果使用chain_cli.sh脚本，确保脚本中的函数调用使用双引号和转义，如下所示：
@@ -170,16 +168,16 @@ docker exec cli_chain peer chaincode query -C $CHANNEL_NAME -n $CHAINCODE_NAME -
 
 ## 链间通信工作流程
 
-1. **用户注册**：在主链上注册用户，生成DID
-2. **用户登录**：
-   - 用户在主链上登录，状态变为"online"
-   - transmit服务自动将用户状态同步到侧链，侧链状态也更新为"online"
-3. **风险行为报告**：
-   - 侧链记录用户的风险行为，计算风险评分
-   - transmit服务自动将侧链的风险评分同步到主链
-4. **用户登出**：
-   - 用户在主链上登出，状态变为"offline"
-   - transmit服务自动将用户状态同步到侧链，侧链状态也更新为"offline"
+1. **设备注册**：在主链上注册设备，生成DID
+2. **风险行为报告**：
+   - 蜜点客户端检测到设备的风险行为，计算风险评分
+   - 将风险评分、攻击画像指数和攻击画像更新到链上
+3. **风险响应**：
+   - 根据设备的风险评分，系统自动执行相应的响应策略
+   - 高风险设备（700-1000分）：硬性阻断
+   - 警戒风险设备（200-699分）：主动欺骗与隔离引导
+   - 关注风险设备（1-199分）：增强监控，主动引诱
+   - 常规风险设备（0分）：标准化信任与监控
 
 ## 常见错误及解决方法
 

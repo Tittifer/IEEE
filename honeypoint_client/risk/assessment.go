@@ -13,139 +13,142 @@ import (
 type RiskAssessor struct {
 	dbManager *db.DBManager
 	// 风险评估参数
-	maxScore       float64 // 最高得分，修改为float64类型
-	decayRate      float64 // 衰减速率系数 beta
-	normalizationT float64 // 风险分数归一化基数 T
-	delta          float64 // 影响低分时降温速度参数
-	alpha          float64 // 影响高分时降温速度参数
+	maxScore float64 // 最高得分 S_{max}
+	delta    float64 // 影响低分时降温速度参数 δ
+	alpha    float64 // 影响高分时降温速度参数 α
+	lambda   float64 // 攻击画像指数衰减系数 λ
 }
 
 // NewRiskAssessor 创建新的风险评估器
 func NewRiskAssessor(dbManager *db.DBManager) *RiskAssessor {
 	return &RiskAssessor{
-		dbManager:      dbManager,
-		maxScore:       100.00, // 修改为浮点数
-		decayRate:      0.01,   // 衰减速率系数，可调整
-		normalizationT: 100.00, // 归一化基数，可调整
-		delta:          0.05,   // 影响低分时降温速度参数，可调整
-		alpha:          0.02,   // 影响高分时降温速度参数，可调整
+		dbManager: dbManager,
+		maxScore:  1000.0, // 最大风险分数 S_{max}
+		delta:     0.05,   // 影响低分时降温速度参数 δ
+		alpha:     0.02,   // 影响高分时降温速度参数 α
+		lambda:    0.01,   // 攻击画像指数衰减系数 λ
 	}
 }
 
-// AssessRisk 评估用户风险
-func (r *RiskAssessor) AssessRisk(did string, behaviorType string) (float64, error) { // 返回值修改为float64类型
-	// 获取用户信息
-	user, err := r.dbManager.GetUserByDID(did)
+// AssessRisk 评估设备风险
+func (r *RiskAssessor) AssessRisk(did string, behaviorType string) (float64, float64, []string, error) {
+	// 从链上获取设备信息
+	device, err := r.dbManager.GetDeviceFromChain(did)
 	if err != nil {
-		return 0.00, fmt.Errorf("获取用户信息失败: %w", err)
+		return 0.0, 0.0, nil, fmt.Errorf("获取设备信息失败: %w", err)
 	}
-	if user == nil {
-		return 0.00, fmt.Errorf("用户不存在: %s", did)
+	if device == nil {
+		return 0.0, 0.0, nil, fmt.Errorf("设备不存在: %s", did)
 	}
 
 	// 获取风险规则
 	rule, err := r.dbManager.GetRiskRuleByType(behaviorType)
 	if err != nil {
-		return 0.00, fmt.Errorf("获取风险规则失败: %w", err)
+		return 0.0, 0.0, nil, fmt.Errorf("获取风险规则失败: %w", err)
 	}
 	if rule == nil {
-		return 0.00, fmt.Errorf("风险规则不存在: %s", behaviorType)
-	}
-
-	// 记录风险行为
-	if err := r.dbManager.RecordRiskBehavior(user.ID, behaviorType, rule.Score); err != nil {
-		return 0.00, fmt.Errorf("记录风险行为失败: %w", err)
+		return 0.0, 0.0, nil, fmt.Errorf("风险规则不存在: %s", behaviorType)
 	}
 
 	// 计算新的风险评分
-	newScore, err := r.calculateRiskScore(user.ID, rule.Score)
+	newScore, newAttackIndex, updatedProfile, err := r.calculateRiskScore(device, rule.Score, rule.Category, rule.Weight)
 	if err != nil {
-		return 0.00, fmt.Errorf("计算风险评分失败: %w", err)
+		return 0.0, 0.0, nil, fmt.Errorf("计算风险评分失败: %w", err)
 	}
 
-	// 更新用户风险评分
-	if err := r.dbManager.UpdateUserRiskScore(user.ID, newScore); err != nil {
-		return 0.00, fmt.Errorf("更新用户风险评分失败: %w", err)
-	}
-
-	log.Printf("用户 %s 执行风险行为 %s，风险评分从 %.2f 更新为 %.2f", did, behaviorType, user.CurrentScore, newScore)
-	return newScore, nil
+	log.Printf("设备 %s 执行风险行为 %s，风险评分从 %.2f 更新为 %.2f，攻击画像指数从 %.2f 更新为 %.2f",
+		did, behaviorType, device.RiskScore, newScore, device.AttackIndexI, newAttackIndex)
+	
+	return newScore, newAttackIndex, updatedProfile, nil
 }
 
 // calculateRiskScore 计算风险评分
-func (r *RiskAssessor) calculateRiskScore(userID int, currentBehaviorScore float64) (float64, error) { // 参数和返回值修改为float64类型
-	// 获取用户信息，以获取当前分数
-	user, err := r.dbManager.GetUserByID(userID)
-	if err != nil {
-		return 0.00, fmt.Errorf("获取用户信息失败: %w", err)
-	}
-	if user == nil {
-		return 0.00, fmt.Errorf("用户不存在: ID=%d", userID)
-	}
-
-	// 获取用户历史风险行为
-	behaviors, err := r.dbManager.GetUserRiskBehaviors(userID, 50) // 获取最近50条记录
-	if err != nil {
-		return 0.00, fmt.Errorf("获取用户历史风险行为失败: %w", err)
-	}
-
-	// 计算历史风险行为影响因子 lambda
-	now := time.Now()
-	var historyImpact float64 = 0.00
-
-	// 如果有历史行为，计算历史影响因子
-	if len(behaviors) > 0 {
-		for _, behavior := range behaviors {
-			// 计算时间差（秒）
-			timeDiff := now.Sub(behavior.Timestamp).Seconds()
-			// 应用衰减公式: e^(-beta*(t-tj))
-			decayFactor := math.Exp(-r.decayRate * timeDiff)
-			// 累加历史影响
-			historyImpact += decayFactor * behavior.Score
+// 按照大纲中的风险评估算法实现
+func (r *RiskAssessor) calculateRiskScore(device *db.Device, baseScore float64, category string, weight float64) (float64, float64, []string, error) {
+	// 复制当前攻击画像
+	attackProfile := make([]string, len(device.AttackProfile))
+	copy(attackProfile, device.AttackProfile)
+	
+	// 步骤2：更新攻击画像指数 (I)
+	var deltaI float64 = 0.0
+	
+	// 检查当前Category是否已存在于该设备的Attack Profile集合中
+	categoryExists := false
+	for _, c := range attackProfile {
+		if c == category {
+			categoryExists = true
+			break
 		}
-		historyImpact /= r.normalizationT
 	}
-
-	// 计算 lambda = 1 + historyImpact
-	lambda := 1.0 + historyImpact
-
-	// 应用降温曲线计算上次得分的衰减值
-	// S_{t-1}^{'}=max(0,S_{t-1}-\frac{\delta*\Delta t}{1+\alpha*S_{t-1}})
-	var cooledPreviousScore float64 = 0.00
 	
-	// 使用用户表中的last_update字段计算时间差
-	// 计算时间差（秒）
-	deltaT := now.Sub(user.LastUpdate).Seconds()
+	// 如果不存在（意图升级）
+	if !categoryExists {
+		deltaI = weight
+		// 将当前Category添加到Attack Profile集合中
+		attackProfile = append(attackProfile, category)
+	}
 	
-	// 应用降温曲线
-	coolingFactor := (r.delta * deltaT) / (1 + r.alpha * user.CurrentScore)
-	cooledPreviousScore = math.Max(0.00, user.CurrentScore - coolingFactor)
-	log.Printf("用户当前分数 %.2f 经过 %.2f 秒的降温后变为 %.2f", user.CurrentScore, deltaT, cooledPreviousScore)
-
-	// 计算得分归一化
-	// 当前我们简化处理，直接使用当前行为得分
-	normalizedScore := currentBehaviorScore
-
-	// 应用分数更新公式: S_t = min(S_max, (Score + S_{t-1}^{'}) * lambda)
-	newScore := math.Min(r.maxScore, (normalizedScore + cooledPreviousScore) * lambda)
-
-	// 保留两位小数
-	newScore = math.Round(newScore*100) / 100
-
-	return newScore, nil
+	// 完成I的累加
+	newAttackIndex := device.AttackIndexI + deltaI
+	
+	// 步骤3：激活威胁状态（已经在调用此函数前更新了t_last）
+	
+	// 步骤4：计算实时风险分 (S_t)
+	// 计算时间间隔 Δt（秒）
+	now := time.Now()
+	deltaT := now.Sub(device.LastEventTime).Seconds()
+	
+	// 对历史分数进行降温
+	coolingFactor := (r.delta * deltaT) / (1 + r.alpha * device.RiskScore)
+	cooledPreviousScore := math.Max(0.0, device.RiskScore - coolingFactor)
+	
+	log.Printf("设备当前分数 %.2f 经过 %.2f 秒的降温后变为 %.2f", device.RiskScore, deltaT, cooledPreviousScore)
+	
+	// 计算最终得分
+	newScore := math.Min(r.maxScore, baseScore * (1 + newAttackIndex) + cooledPreviousScore)
+	
+	// 步骤5：后台状态维护（周期性任务）- 在另一个函数中实现
+	
+	return newScore, newAttackIndex, attackProfile, nil
 }
 
-// GetCurrentRiskScore 获取用户当前风险评分
-func (r *RiskAssessor) GetCurrentRiskScore(did string) (float64, error) { // 返回值修改为float64类型
-	user, err := r.dbManager.GetUserByDID(did)
+// PerformBackgroundMaintenance 执行后台状态维护
+// 周期性调用此函数，用于攻击画像指数的慢速衰减
+func (r *RiskAssessor) PerformBackgroundMaintenance(did string) error {
+	// 从链上获取设备信息
+	device, err := r.dbManager.GetDeviceFromChain(did)
 	if err != nil {
-		return 0.00, fmt.Errorf("获取用户信息失败: %w", err)
+		return fmt.Errorf("获取设备信息失败: %w", err)
 	}
-	if user == nil {
-		return 0.00, fmt.Errorf("用户不存在: %s", did)
+	if device == nil {
+		return fmt.Errorf("设备不存在: %s", did)
+	}
+	
+	// 计算时间间隔（秒）
+	now := time.Now()
+	deltaT := now.Sub(device.LastEventTime).Seconds()
+	
+	// I慢速衰减: 确保旧的威胁记录会随时间慢慢淡化
+	// I_{new} = I_{old} * e^{-λ*Δt}
+	newAttackIndex := device.AttackIndexI * math.Exp(-r.lambda * deltaT)
+	
+	log.Printf("设备 %s 的攻击画像指数从 %.2f 衰减为 %.2f", did, device.AttackIndexI, newAttackIndex)
+	
+	// 更新到链上（通过数据库管理器）
+	return r.dbManager.UpdateDeviceAttackIndex(did, newAttackIndex)
+}
+
+// GetCurrentRiskScore 获取设备当前风险评分
+func (r *RiskAssessor) GetCurrentRiskScore(did string) (float64, error) {
+	device, err := r.dbManager.GetDeviceFromChain(did)
+	if err != nil {
+		return 0.0, fmt.Errorf("获取设备信息失败: %w", err)
+	}
+	if device == nil {
+		return 0.0, fmt.Errorf("设备不存在: %s", did)
 	}
 
-	return user.CurrentScore, nil
+	return device.RiskScore, nil
 }
 
 // ListAvailableRiskBehaviors 列出可用的风险行为类型

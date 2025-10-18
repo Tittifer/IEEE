@@ -1,0 +1,11 @@
+{
+  "mspID": "Org1MSP",
+  "cryptoPath": "../chain_docker/crypto-config/peerOrganizations/org1.chain.com",
+  "certPath": "../chain_docker/crypto-config/peerOrganizations/org1.chain.com/users/User1@org1.chain.com/msp/signcerts/User1@org1.chain.com-cert.pem",
+  "keyPath": "../chain_docker/crypto-config/peerOrganizations/org1.chain.com/users/User1@org1.chain.com/msp/keystore/",
+  "tlsCertPath": "../chain_docker/crypto-config/peerOrganizations/org1.chain.com/peers/peer0.org1.chain.com/tls/ca.crt",
+  "peerEndpoint": "localhost:8051",
+  "gatewayPeer": "peer0.org1.chain.com",
+  "channelName": "mainchannel",
+  "chaincodeName": "chaincc"
+}

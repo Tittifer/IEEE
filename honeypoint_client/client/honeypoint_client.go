@@ -27,6 +27,7 @@ type HoneypointClient struct {
 	config       *ConnectionConfig
 	dbManager    *db.DBManager
 	riskAssessor *risk.RiskAssessor
+	chainClient  *ChainClient
 	network      *client.Network
 	stopChan     chan struct{}
 	isRunning    bool
@@ -34,20 +35,23 @@ type HoneypointClient struct {
 	cancel       context.CancelFunc
 }
 
-// 用户事件结构体，用于解析链码事件
-type UserEvent struct {
-	EventType string  `json:"eventType"` // 事件类型
-	DID       string  `json:"did"`       // 用户DID
-	Name      string  `json:"name"`      // 用户名称
-	Timestamp int64   `json:"timestamp"` // 事件时间戳
-	RiskScore float64 `json:"riskScore"` // 风险评分（可选），修改为float64类型
+// 设备事件结构体，用于解析链码事件
+type DeviceEvent struct {
+	EventType    string    `json:"eventType"`    // 事件类型
+	DID          string    `json:"did"`          // 设备DID
+	Name         string    `json:"name"`         // 设备名称
+	Timestamp    int64     `json:"timestamp"`    // 事件时间戳
+	RiskScore    float64   `json:"riskScore"`    // 风险评分
+	Category     string    `json:"category"`     // 行为类别
+	BehaviorType string    `json:"behaviorType"` // 具体行为类型
 }
 
 // 合约名称常量
 const (
 	identityContract   = "IdentityContract"
+	riskContract       = "RiskContract"
 	configPath         = "config.json"
-	riskScoreThreshold = 50.00 // 风险评分阈值，修改为浮点数
+	riskScoreThreshold = 50.00 // 风险评分阈值
 )
 
 // NewHoneypointClient 创建新的蜜点后台客户端
@@ -123,33 +127,38 @@ func NewHoneypointClient() (*HoneypointClient, error) {
 	// 获取智能合约
 	contract := network.GetContract(config.ChaincodeName)
 
-	// 创建数据库管理器
-	dbManager, err := db.NewDBManager(config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName)
-	if err != nil {
-		gw.Close()
-		conn.Close()
-		return nil, fmt.Errorf("创建数据库管理器失败: %w", err)
-	}
-
-	// 创建风险评估器
-	riskAssessor := risk.NewRiskAssessor(dbManager)
-
 	// 创建上下文，用于取消事件监听
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// 创建蜜点后台客户端
 	honeypointClient := &HoneypointClient{
-		contract:     contract,
-		gateway:      gw,
-		conn:         conn,
-		config:       config,
-		dbManager:    dbManager,
-		riskAssessor: riskAssessor,
-		network:      network,
-		stopChan:     make(chan struct{}),
-		ctx:          ctx,
-		cancel:       cancel,
+		contract:  contract,
+		gateway:   gw,
+		conn:      conn,
+		config:    config,
+		network:   network,
+		stopChan:  make(chan struct{}),
+		ctx:       ctx,
+		cancel:    cancel,
 	}
+
+	// 创建区块链客户端
+	chainClient := NewChainClient(honeypointClient)
+	honeypointClient.chainClient = chainClient
+
+	// 创建数据库管理器
+	dbManager, err := db.NewDBManager(config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName, chainClient)
+	if err != nil {
+		gw.Close()
+		conn.Close()
+		cancel()
+		return nil, fmt.Errorf("创建数据库管理器失败: %w", err)
+	}
+	honeypointClient.dbManager = dbManager
+
+	// 创建风险评估器
+	riskAssessor := risk.NewRiskAssessor(dbManager)
+	honeypointClient.riskAssessor = riskAssessor
 
 	return honeypointClient, nil
 }
@@ -189,20 +198,17 @@ func (c *HoneypointClient) StartEventListener() error {
 
 	c.isRunning = true
 
-	// 监听用户注册事件
-	go c.listenForUserRegistered()
-
-	// 监听用户登录事件
-	go c.listenForUserLoggedIn()
-
-	// 监听用户登出事件
-	go c.listenForUserLoggedOut()
+	// 监听设备注册事件
+	go c.listenForDeviceRegistered()
 
 	// 监听风险评分更新事件
 	go c.listenForRiskScoreUpdated()
 	
 	// 监听风险评分重置事件
 	go c.listenForRiskScoreReset()
+
+	// 启动周期性维护任务
+	go c.startPeriodicMaintenance()
 
 	log.Println("事件监听器已启动")
 	return nil
@@ -220,14 +226,14 @@ func (c *HoneypointClient) StopEventListener() {
 	log.Println("事件监听器已停止")
 }
 
-// listenForUserRegistered 监听用户注册事件
-func (c *HoneypointClient) listenForUserRegistered() {
-	log.Println("开始监听用户注册事件...")
+// listenForDeviceRegistered 监听设备注册事件
+func (c *HoneypointClient) listenForDeviceRegistered() {
+	log.Println("开始监听设备注册事件...")
 
 	// 使用新的API监听链码事件
 	events, err := c.network.ChaincodeEvents(c.ctx, c.config.ChaincodeName)
 	if err != nil {
-		log.Printf("注册用户注册事件监听失败: %v", err)
+		log.Printf("注册设备注册事件监听失败: %v", err)
 		return
 	}
 
@@ -240,127 +246,22 @@ func (c *HoneypointClient) listenForUserRegistered() {
 				return
 			}
 
-			// 只处理UserRegistered事件
-			if event.EventName != "UserRegistered" {
+			// 只处理DeviceRegistered事件
+			if event.EventName != "DeviceRegistered" {
 				continue
 			}
 
 			// 解析事件数据
-			var userEvent UserEvent
-			if err := json.Unmarshal(event.Payload, &userEvent); err != nil {
-				log.Printf("解析用户注册事件数据失败: %v", err)
+			var deviceEvent DeviceEvent
+			if err := json.Unmarshal(event.Payload, &deviceEvent); err != nil {
+				log.Printf("解析设备注册事件数据失败: %v", err)
 				continue
 			}
 
-			log.Printf("收到用户注册事件: DID=%s, 姓名=%s", userEvent.DID, userEvent.Name)
-
-			// 在数据库中创建用户
-			_, err := c.dbManager.CreateUser(userEvent.DID, userEvent.Name)
-			if err != nil {
-				log.Printf("创建用户失败: %v", err)
-				continue
-			}
-
-			log.Printf("用户 %s 已添加到数据库", userEvent.DID)
-		}
-	}
-}
-
-// listenForUserLoggedIn 监听用户登录事件
-func (c *HoneypointClient) listenForUserLoggedIn() {
-	log.Println("开始监听用户登录事件...")
-
-	// 使用新的API监听链码事件
-	events, err := c.network.ChaincodeEvents(c.ctx, c.config.ChaincodeName)
-	if err != nil {
-		log.Printf("注册用户登录事件监听失败: %v", err)
-		return
-	}
-
-	for {
-		select {
-		case <-c.stopChan:
-			return
-		case event, ok := <-events:
-			if !ok {
-				return
-			}
-
-			// 只处理UserLoggedIn事件
-			if event.EventName != "UserLoggedIn" {
-				continue
-			}
-
-			// 解析事件数据
-			var userEvent UserEvent
-			if err := json.Unmarshal(event.Payload, &userEvent); err != nil {
-				log.Printf("解析用户登录事件数据失败: %v", err)
-				continue
-			}
-
-			log.Printf("收到用户登录事件: DID=%s, 姓名=%s", userEvent.DID, userEvent.Name)
-
-			// 检查用户是否存在
-			user, err := c.dbManager.GetUserByDID(userEvent.DID)
-			if err != nil {
-				log.Printf("获取用户信息失败: %v", err)
-				continue
-			}
-
-			if user == nil {
-				// 用户不存在，创建用户
-				_, err := c.dbManager.CreateUser(userEvent.DID, userEvent.Name)
-				if err != nil {
-					log.Printf("创建用户失败: %v", err)
-					continue
-				}
-				log.Printf("用户 %s 已添加到数据库", userEvent.DID)
-			} else {
-				log.Printf("用户 %s 已登录，当前风险评分: %.2f", userEvent.DID, user.CurrentScore)
-			}
-
-			// 启动风险监控
-			go c.startRiskMonitoring(userEvent.DID)
-		}
-	}
-}
-
-// listenForUserLoggedOut 监听用户登出事件
-func (c *HoneypointClient) listenForUserLoggedOut() {
-	log.Println("开始监听用户登出事件...")
-
-	// 使用新的API监听链码事件
-	events, err := c.network.ChaincodeEvents(c.ctx, c.config.ChaincodeName)
-	if err != nil {
-		log.Printf("注册用户登出事件监听失败: %v", err)
-		return
-	}
-
-	for {
-		select {
-		case <-c.stopChan:
-			return
-		case event, ok := <-events:
-			if !ok {
-				return
-			}
-
-			// 只处理UserLoggedOut事件
-			if event.EventName != "UserLoggedOut" {
-				continue
-			}
-
-			// 解析事件数据
-			var userEvent UserEvent
-			if err := json.Unmarshal(event.Payload, &userEvent); err != nil {
-				log.Printf("解析用户登出事件数据失败: %v", err)
-				continue
-			}
-
-			log.Printf("收到用户登出事件: DID=%s, 姓名=%s", userEvent.DID, userEvent.Name)
-
-			// 用户登出，不需要特别处理，只记录日志
-			log.Printf("用户 %s 已登出", userEvent.DID)
+			log.Printf("收到设备注册事件: DID=%s, 名称=%s", deviceEvent.DID, deviceEvent.Name)
+			
+			// 设备注册后立即启动风险监控
+			go c.startRiskMonitoring(deviceEvent.DID)
 		}
 	}
 }
@@ -391,108 +292,68 @@ func (c *HoneypointClient) listenForRiskScoreUpdated() {
 			}
 
 			// 解析事件数据
-			var userEvent UserEvent
-			if err := json.Unmarshal(event.Payload, &userEvent); err != nil {
+			var deviceEvent DeviceEvent
+			if err := json.Unmarshal(event.Payload, &deviceEvent); err != nil {
 				log.Printf("解析风险评分更新事件数据失败: %v", err)
 				continue
 			}
 
-			log.Printf("收到风险评分更新事件: DID=%s, 姓名=%s, 风险评分=%.2f", userEvent.DID, userEvent.Name, userEvent.RiskScore)
-
-			// 获取用户信息
-			user, err := c.dbManager.GetUserByDID(userEvent.DID)
-			if err != nil {
-				log.Printf("获取用户信息失败: %v", err)
-				continue
-			}
-
-			if user == nil {
-				log.Printf("用户 %s 不存在", userEvent.DID)
-				continue
-			}
-
-			// 更新用户风险评分
-			if err := c.dbManager.UpdateUserRiskScore(user.ID, userEvent.RiskScore); err != nil {
-				log.Printf("更新用户风险评分失败: %v", err)
-				continue
-			}
-
-			log.Printf("用户 %s 的风险评分已更新为 %.2f", userEvent.DID, userEvent.RiskScore)
+			log.Printf("收到风险评分更新事件: DID=%s, 名称=%s, 风险评分=%.2f", deviceEvent.DID, deviceEvent.Name, deviceEvent.RiskScore)
 		}
 	}
 }
 
 // startRiskMonitoring 启动风险监控
 func (c *HoneypointClient) startRiskMonitoring(did string) {
-	log.Printf("开始对用户 %s 进行风险监控", did)
+	log.Printf("开始对设备 %s 进行风险监控", did)
 
-	// 获取用户信息
-	user, err := c.dbManager.GetUserByDID(did)
+	// 检查设备是否存在
+	_, err := c.chainClient.GetDeviceInfo(did)
 	if err != nil {
-		log.Printf("获取用户信息失败: %v", err)
+		log.Printf("获取设备信息失败: %v", err)
 		return
 	}
 
-	if user == nil {
-		log.Printf("用户 %s 不存在", did)
+	// 列出可用的风险行为
+	rules, err := c.riskAssessor.ListAvailableRiskBehaviors()
+	if err != nil {
+		log.Printf("获取风险行为列表失败: %v", err)
 		return
 	}
 
-	// 模拟接收风险行为
-	go func() {
-		// 列出可用的风险行为
-		rules, err := c.riskAssessor.ListAvailableRiskBehaviors()
-		if err != nil {
-			log.Printf("获取风险行为列表失败: %v", err)
-			return
-		}
+	log.Printf("可用的风险行为类型:")
+	for i, rule := range rules {
+		log.Printf("%d. %s - %s (得分: %.2f, 类别: %s, 权重: %.2f)", i+1, rule.BehaviorType, rule.Description, rule.Score, rule.Category, rule.Weight)
+	}
 
-		log.Printf("可用的风险行为类型:")
-		for i, rule := range rules {
-			log.Printf("%d. %s - %s (得分: %.2f)", i+1, rule.BehaviorType, rule.Description, rule.Score)
-		}
-
-		log.Printf("请通过命令行输入风险行为类型来模拟用户风险行为")
-	}()
+	log.Printf("设备 %s 已开始风险监控，可通过命令行输入风险行为类型来模拟设备风险行为", did)
 }
 
-// ProcessRiskBehavior 处理用户风险行为
+// ProcessRiskBehavior 处理设备风险行为
 func (c *HoneypointClient) ProcessRiskBehavior(did string, behaviorType string) error {
 	// 评估风险
-	newScore, err := c.riskAssessor.AssessRisk(did, behaviorType)
+	newScore, newAttackIndex, updatedProfile, err := c.riskAssessor.AssessRisk(did, behaviorType)
 	if err != nil {
 		return fmt.Errorf("风险评估失败: %w", err)
 	}
 
 	// 无论风险评分是否超过阈值，都立即向链上报告
-	log.Printf("用户 %s 的风险评分为 %.2f，立即向链上报告", did, newScore)
+	log.Printf("设备 %s 的风险评分为 %.2f，攻击画像指数为 %.2f，立即向链上报告", did, newScore, newAttackIndex)
 
-	// 将浮点数转换为字符串，保留两位小数
-	scoreStr := fmt.Sprintf("%.2f", newScore)
-
-	// 向链上报告风险评分
-	_, err = c.contract.SubmitTransaction(identityContract+":UpdateRiskScore", did, scoreStr)
+	// 更新链上设备风险评分
+	err = c.chainClient.UpdateDeviceRiskScore(did, newScore, newAttackIndex, updatedProfile)
 	if err != nil {
 		return fmt.Errorf("向链上报告风险评分失败: %w", err)
 	}
 
-	log.Printf("已向链上报告用户 %s 的风险评分 %.2f", did, newScore)
+	log.Printf("已向链上报告设备 %s 的风险评分 %.2f", did, newScore)
 
 	// 检查风险评分是否超过阈值
 	if newScore >= riskScoreThreshold {
-		log.Printf("用户 %s 的风险评分 %.2f 超过阈值 %.2f，可能会被强制退出", did, newScore, riskScoreThreshold)
+		log.Printf("设备 %s 的风险评分 %.2f 超过阈值 %.2f，可能会被限制访问", did, newScore, riskScoreThreshold)
 	}
 
 	return nil
-}
-
-// 辅助函数：加载证书
-func loadCertificate(filename string) (*x509.Certificate, error) {
-	certificatePEM, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return nil, fmt.Errorf("读取证书文件失败: %w", err)
-	}
-	return identity.CertificateFromPEM(certificatePEM)
 }
 
 // listenForRiskScoreReset 监听风险评分重置事件
@@ -521,34 +382,83 @@ func (c *HoneypointClient) listenForRiskScoreReset() {
 			}
 
 			// 解析事件数据
-			var userEvent UserEvent
-			if err := json.Unmarshal(event.Payload, &userEvent); err != nil {
+			var deviceEvent DeviceEvent
+			if err := json.Unmarshal(event.Payload, &deviceEvent); err != nil {
 				log.Printf("解析风险评分重置事件数据失败: %v", err)
 				continue
 			}
 
-			log.Printf("收到风险评分重置事件: DID=%s, 姓名=%s", userEvent.DID, userEvent.Name)
+			log.Printf("收到风险评分重置事件: DID=%s, 名称=%s", deviceEvent.DID, deviceEvent.Name)
 
-			// 清除用户风险数据
-			if err := c.ClearUserRiskData(userEvent.DID); err != nil {
-				log.Printf("清除用户风险数据失败: %v", err)
+			// 重置设备风险数据
+			if err := c.dbManager.ResetDeviceRiskData(deviceEvent.DID); err != nil {
+				log.Printf("重置设备风险数据失败: %v", err)
 				continue
 			}
 
-			log.Printf("用户 %s 的风险数据已重置", userEvent.DID)
+			log.Printf("设备 %s 的风险数据已重置", deviceEvent.DID)
 		}
 	}
 }
 
-// ClearUserRiskData 清除用户风险数据
-func (c *HoneypointClient) ClearUserRiskData(did string) error {
-	// 调用数据库管理器清除用户风险数据
-	if err := c.dbManager.ClearUserRiskData(did); err != nil {
-		return fmt.Errorf("清除用户风险数据失败: %w", err)
+// startPeriodicMaintenance 启动周期性维护任务
+func (c *HoneypointClient) startPeriodicMaintenance() {
+	// 每小时执行一次维护任务
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	log.Println("启动周期性维护任务")
+
+	for {
+		select {
+		case <-c.stopChan:
+			return
+		case <-ticker.C:
+			// 获取所有设备
+			devices, err := c.getAllDevices()
+			if err != nil {
+				log.Printf("获取所有设备失败: %v", err)
+				continue
+			}
+
+			// 对每个设备执行维护任务
+			for _, device := range devices {
+				// 执行攻击画像指数的慢速衰减
+				err := c.riskAssessor.PerformBackgroundMaintenance(device.DID)
+				if err != nil {
+					log.Printf("执行设备 %s 的维护任务失败: %v", device.DID, err)
+				} else {
+					log.Printf("已完成设备 %s 的维护任务", device.DID)
+				}
+			}
+		}
 	}
-	
-	log.Printf("已清除用户 %s 的风险数据", did)
-	return nil
+}
+
+// getAllDevices 获取所有设备
+func (c *HoneypointClient) getAllDevices() ([]*db.Device, error) {
+	// 调用链码获取所有设备
+	devicesJSON, err := c.contract.EvaluateTransaction("IdentityContract:GetAllDevices")
+	if err != nil {
+		return nil, fmt.Errorf("评估交易失败: %w", err)
+	}
+
+	// 解析设备列表
+	var devices []*db.Device
+	if err := json.Unmarshal(devicesJSON, &devices); err != nil {
+		return nil, fmt.Errorf("设备列表解析失败: %w", err)
+	}
+
+	return devices, nil
+}
+
+// 辅助函数：加载证书
+func loadCertificate(filename string) (*x509.Certificate, error) {
+	certificatePEM, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("读取证书文件失败: %w", err)
+	}
+	return identity.CertificateFromPEM(certificatePEM)
 }
 
 // 辅助函数：加载私钥
