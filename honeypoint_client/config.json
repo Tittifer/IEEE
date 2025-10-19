@@ -7,10 +7,5 @@
   "peerEndpoint": "localhost:8051",
   "gatewayPeer": "peer0.org1.chain.com",
   "channelName": "mainchannel",
-  "chaincodeName": "chaincc",
-  "dbHost": "127.0.0.1",
-  "dbPort": 3306,
-  "dbUser": "root",
-  "dbPassword": "1",
-  "dbName": "ieee_honeypoint"
+  "chaincodeName": "chaincc"
 }

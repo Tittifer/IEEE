@@ -19,12 +19,6 @@ type ConnectionConfig struct {
 	GatewayPeer   string `json:"gatewayPeer"`
 	ChannelName   string `json:"channelName"`
 	ChaincodeName string `json:"chaincodeName"`
-	// MySQL数据库配置
-	DBHost     string `json:"dbHost"`
-	DBPort     int    `json:"dbPort"`
-	DBUser     string `json:"dbUser"`
-	DBPassword string `json:"dbPassword"`
-	DBName     string `json:"dbName"`
 }
 
 // LoadConfig 从文件加载配置
@@ -48,12 +42,6 @@ func LoadConfig(configPath string) (*ConnectionConfig, error) {
 			GatewayPeer:  "peer0.org1.chain.com",
 			ChannelName:  "mainchannel",
 			ChaincodeName: "chaincc",
-			// MySQL数据库默认配置
-			DBHost:     "localhost",
-			DBPort:     3306,
-			DBUser:     "root",
-			DBPassword: "1",
-			DBName:     "ieee_honeypoint",
 		}
 
 		// 将默认配置写入文件

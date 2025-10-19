@@ -6,10 +6,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/Tittifer/IEEE/honeypoint_client/db"
+	"github.com/Tittifer/IEEE/honeypoint_client/chain"
 )
 
-// ChainClient 区块链客户端，实现db.ChainClient接口
+// ChainClient 区块链客户端，实现chain.ChainClient接口
 type ChainClient struct {
 	honeypointClient *HoneypointClient
 }
@@ -22,7 +22,7 @@ func NewChainClient(honeypointClient *HoneypointClient) *ChainClient {
 }
 
 // GetDeviceInfo 从区块链获取设备信息
-func (c *ChainClient) GetDeviceInfo(did string) (*db.Device, error) {
+func (c *ChainClient) GetDeviceInfo(did string) (*chain.Device, error) {
 	// 调用链码获取设备信息
 	deviceJSON, err := c.honeypointClient.contract.EvaluateTransaction("IdentityContract:GetDevice", did)
 	if err != nil {
@@ -51,7 +51,7 @@ func (c *ChainClient) GetDeviceInfo(did string) (*db.Device, error) {
 	}
 
 	// 转换为Device结构体
-	device := &db.Device{
+	device := &chain.Device{
 		DID:           deviceInfo.DID,
 		Name:          deviceInfo.Name,
 		Model:         deviceInfo.Model,

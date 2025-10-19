@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/Tittifer/IEEE/honeypoint_client/db"
+	"github.com/Tittifer/IEEE/honeypoint_client/chain"
 	"github.com/Tittifer/IEEE/honeypoint_client/risk"
 )
 
@@ -25,7 +25,7 @@ type HoneypointClient struct {
 	gateway      *client.Gateway
 	conn         *grpc.ClientConn
 	config       *ConnectionConfig
-	dbManager    *db.DBManager
+	chainManager *chain.ChainManager
 	riskAssessor *risk.RiskAssessor
 	chainClient  *ChainClient
 	network      *client.Network
@@ -146,18 +146,12 @@ func NewHoneypointClient() (*HoneypointClient, error) {
 	chainClient := NewChainClient(honeypointClient)
 	honeypointClient.chainClient = chainClient
 
-	// 创建数据库管理器
-	dbManager, err := db.NewDBManager(config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName, chainClient)
-	if err != nil {
-		gw.Close()
-		conn.Close()
-		cancel()
-		return nil, fmt.Errorf("创建数据库管理器失败: %w", err)
-	}
-	honeypointClient.dbManager = dbManager
+	// 创建区块链管理器
+	chainManager := chain.NewChainManager(chainClient)
+	honeypointClient.chainManager = chainManager
 
 	// 创建风险评估器
-	riskAssessor := risk.NewRiskAssessor(dbManager)
+	riskAssessor := risk.NewRiskAssessor(chainManager)
 	honeypointClient.riskAssessor = riskAssessor
 
 	return honeypointClient, nil
@@ -168,11 +162,6 @@ func (c *HoneypointClient) Close() {
 	// 停止事件监听
 	if c.isRunning {
 		c.StopEventListener()
-	}
-
-	// 关闭数据库连接
-	if c.dbManager != nil {
-		c.dbManager.Close()
 	}
 
 	// 关闭区块链连接
@@ -314,19 +303,16 @@ func (c *HoneypointClient) startRiskMonitoring(did string) {
 		return
 	}
 
-	// 列出可用的风险行为
-	rules, err := c.riskAssessor.ListAvailableRiskBehaviors()
-	if err != nil {
-		log.Printf("获取风险行为列表失败: %v", err)
-		return
-	}
+	// 列出可用的风险行为（仅用于验证规则加载成功）
+	_ = c.riskAssessor.ListAvailableRiskBehaviors()
 
-	log.Printf("可用的风险行为类型:")
-	for i, rule := range rules {
-		log.Printf("%d. %s - %s (得分: %.2f, 类别: %s, 权重: %.2f)", i+1, rule.BehaviorType, rule.Description, rule.Score, rule.Category, rule.Weight)
-	}
+	// 日志已禁用，避免输出过多信息
+	// log.Printf("可用的风险行为类型:")
+	// for i, rule := range rules {
+	// 	log.Printf("%d. %s - %s (得分: %.2f, 类别: %s, 权重: %.2f)", i+1, rule.BehaviorType, rule.Description, rule.Score, rule.Category, rule.Weight)
+	// }
 
-	log.Printf("设备 %s 已开始风险监控，可通过命令行输入风险行为类型来模拟设备风险行为", did)
+	log.Printf("设备 %s 已开始风险监控", did)
 }
 
 // ProcessRiskBehavior 处理设备风险行为
@@ -391,7 +377,7 @@ func (c *HoneypointClient) listenForRiskScoreReset() {
 			log.Printf("收到风险评分重置事件: DID=%s, 名称=%s", deviceEvent.DID, deviceEvent.Name)
 
 			// 重置设备风险数据
-			if err := c.dbManager.ResetDeviceRiskData(deviceEvent.DID); err != nil {
+			if err := c.chainManager.ResetDeviceRiskData(deviceEvent.DID); err != nil {
 				log.Printf("重置设备风险数据失败: %v", err)
 				continue
 			}
@@ -403,8 +389,8 @@ func (c *HoneypointClient) listenForRiskScoreReset() {
 
 // startPeriodicMaintenance 启动周期性维护任务
 func (c *HoneypointClient) startPeriodicMaintenance() {
-	// 每小时执行一次维护任务
-	ticker := time.NewTicker(1 * time.Hour)
+	// 每天执行一次维护任务
+	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 
 	log.Println("启动周期性维护任务")
@@ -436,7 +422,7 @@ func (c *HoneypointClient) startPeriodicMaintenance() {
 }
 
 // getAllDevices 获取所有设备
-func (c *HoneypointClient) getAllDevices() ([]*db.Device, error) {
+func (c *HoneypointClient) getAllDevices() ([]*chain.Device, error) {
 	// 调用链码获取所有设备
 	devicesJSON, err := c.contract.EvaluateTransaction("IdentityContract:GetAllDevices")
 	if err != nil {
@@ -444,7 +430,7 @@ func (c *HoneypointClient) getAllDevices() ([]*db.Device, error) {
 	}
 
 	// 解析设备列表
-	var devices []*db.Device
+	var devices []*chain.Device
 	if err := json.Unmarshal(devicesJSON, &devices); err != nil {
 		return nil, fmt.Errorf("设备列表解析失败: %w", err)
 	}

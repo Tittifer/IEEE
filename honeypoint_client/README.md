@@ -8,7 +8,7 @@
 2. 实现风险评估算法，计算设备风险评分
 3. 支持命令行输入风险行为，模拟设备风险行为
 4. 当设备风险评分发生变化时，向区块链报告
-5. 维护风险规则数据库
+5. 维护风险规则
 
 ## 目录结构
 
@@ -18,26 +18,26 @@ honeypoint_client/
 │   ├── config.go     # 配置文件
 │   ├── chain_client.go # 区块链客户端
 │   └── honeypoint_client.go # 主客户端代码
-├── db/               # 数据库相关代码
-│   └── database.go   # 数据库操作
+├── chain/            # 区块链相关代码
+│   └── chain_manager.go # 区块链管理器
 ├── risk/             # 风险评估相关代码
-│   └── assessment.go # 风险评估算法
+│   ├── assessment.go # 风险评估算法
+│   └── rules.go      # 风险规则定义
 ├── go.mod            # Go模块文件
 ├── main.go           # 主程序入口
 └── README.md         # 说明文档
 ```
 
-## 数据库结构
+## 风险规则结构
 
-蜜点后台客户端使用MySQL数据库，包含以下表：
+风险规则直接定义在代码中，包含以下字段：
 
-1. `risk_rules` - 存储风险规则
-   - `id` - 主键
-   - `behavior_type` - 行为类型
-   - `category` - 行为类别
-   - `score` - 基础分数
-   - `weight` - 权重
-   - `description` - 描述
+1. `RiskRule` - 风险规则结构体
+   - `BehaviorType` - 行为类型
+   - `Category` - 行为类别
+   - `Score` - 基础分数
+   - `Weight` - 权重
+   - `Description` - 描述
 
 ## 区块链存储
 
@@ -102,8 +102,7 @@ honeypoint_client/
 
 ## 使用方法
 
-1. 确保MySQL数据库已启动，并创建了`ieee_honeypoint`数据库
-2. 运行程序：
+1. 运行程序：
    ```
    go run main.go
    ```
